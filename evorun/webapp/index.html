@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Evorun — Tree Search Visualizer ✨</title>
+  <title>Evorun — Tree Search Visualizer</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,11 +14,12 @@
 <body>
   <div id="app">
     <header>
-      <h1>Evorun Snapshot Visualizer ✨🌸</h1>
+      <h1>Evorun Snapshot Visualizer</h1>
+      <p class="subtitle">a gentle tree-search companion ♡</p>
       <div id="file-drop-zone">
         <input type="file" id="file-input" accept=".json" hidden>
-        <button id="browse-btn">Load .evorun_state.json ✨</button>
-        <p>or drag and drop a state file here~ (◕‿◕)</p>
+        <button id="browse-btn">Load .evorun_state.json</button>
+        <p>or drop a state file here</p>
       </div>
     </header>
 
@@ -53,7 +54,7 @@
 
       <!-- Score chart -->
       <section id="chart-section">
-        <h2>Score Progression ✨</h2>
+        <h2>Score Progression</h2>
         <div class="chart-container">
           <canvas id="score-chart"></canvas>
         </div>
@@ -63,31 +64,37 @@
       <div id="split-view">
         <!-- Tree panel -->
         <section id="tree-panel">
-          <h2>MCTS Tree 🌳</h2>
+          <h2>MCTS Tree</h2>
           <div class="tree-controls">
-            <button id="expand-all">Expand All ✨</button>
-            <button id="collapse-all">Collapse All 🌸</button>
+            <button id="expand-all">Expand all</button>
+            <button id="collapse-all">Collapse all</button>
           </div>
           <div id="tree-container"></div>
         </section>
 
         <!-- Iterations panel -->
         <section id="iterations-panel">
-          <h2>Iterations 📋</h2>
+          <h2>Iterations</h2>
           <div id="iterations-list"></div>
         </section>
       </div>
 
       <!-- Node details section -->
       <section id="diff-section" style="display:none">
-        <h2>Node Details ✏️</h2>
+        <h2>Node Details</h2>
         <div class="diff-controls">
-          <button id="close-diff" style="display:none">Close (◕‿◕)</button>
+          <button id="close-diff" style="display:none">Close</button>
         </div>
         <div id="diff-output" class="diff-output"></div>
       </section>
 
     </main>
+
+    <footer class="cute-footer">
+      <div class="footer-rule" aria-hidden="true"></div>
+      <div class="made-with">made with <span class="heart">♡</span></div>
+    </footer>
+
   </div>
 
   <script src="js/state-loader.js"></script>

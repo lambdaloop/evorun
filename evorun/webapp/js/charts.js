@@ -82,15 +82,16 @@ function renderScoreChart() {
           displayColors: false,
           callbacks: {
             title: function(items) {
-              if (!items || items.length === 0) return 'No data';
+              if (!items || items.length === 0) return 'No data~ (｡•́︿•̀｡)';
               const idx = items[0].dataIndex;
               const p = currentProgression[idx];
-              return p ? `Iteration ${p.iter}` : `Iteration ?`;
+              return p ? `Iteration ${p.iter} ✨` : `Iteration ? ✨`;
             },
             label: function(item) {
               const p = currentProgression[item.dataIndex];
               if (!p) return '';
-              return `Best Score: ${p.runningBest !== null ? p.runningBest.toFixed(6) : 'N/A'}`;
+              const emoji = p.isImprovement ? '🎀' : '·';
+              return `${emoji} Best Score: ${p.runningBest !== null ? p.runningBest.toFixed(6) : 'N/A'}`;
             },
             afterLabel: function(item) {
               const p = currentProgression[item.dataIndex];
@@ -98,6 +99,8 @@ function renderScoreChart() {
               const lines = [];
               if (p.editSummary) lines.push(`Change: ${p.editSummary}`);
               if (p.score !== p.runningBest) lines.push(`Actual score: ${p.score.toFixed(6)}`);
+              lines.push('');
+              lines.push('Keep going~ (◕‿◕)');
               return lines;
             },
           },

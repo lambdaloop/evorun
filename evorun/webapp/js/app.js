@@ -14,7 +14,7 @@ function renderSummary() {
 
   document.getElementById('sum-nodes').textContent = nodes.length;
   document.getElementById('sum-depth').textContent = tree?.max_depth ?? '-';
-  document.getElementById('sum-maximize').textContent = maximize ? '\u2191 cute!' : '\u2193 so close~';
+  document.getElementById('sum-maximize').textContent = maximize ? '\u2191 yes' : '\u2193 no';
 }
 
 function renderIterations() {
@@ -38,13 +38,14 @@ function renderIterations() {
 
     if (isBest) item.classList.add('best');
     if (isActualError) item.classList.add('timed-out');
+    if (isRoot) item.classList.add('is-root');
 
     const header = document.createElement('div');
     header.className = 'iteration-header';
 
     const num = document.createElement('span');
     num.className = 'iteration-num';
-    num.textContent = isRoot ? 'Root' : `Step ${node.step}`;
+    num.textContent = isRoot ? '\uD83C\uDF38 Root' : `Step ${node.step}`;
 
     const score = document.createElement('span');
     score.className = 'iteration-score';
@@ -101,7 +102,7 @@ function renderIterations() {
       summary.textContent = scoreReason;
     } else {
       summary.style.color = 'var(--text-muted)';
-      summary.textContent = 'No edit summary~';
+      summary.textContent = 'No edit summary';
     }
     item.appendChild(summary);
 
@@ -141,11 +142,11 @@ function renderIterations() {
       diffHeader.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0;font-size:12px;color:#ffc0e8;';
 
       const diffToggle = document.createElement('span');
-      diffToggle.textContent = '▶';
-      diffToggle.style.cssText = 'font-size:9px;transition:transform 0.15s;';
+      diffToggle.textContent = '›';
+      diffToggle.style.cssText = 'font-size:9px;transition:transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);';
 
       const diffLabel = document.createElement('span');
-      diffLabel.textContent = 'View diff ✨';
+      diffLabel.textContent = 'View diff';
 
       diffHeader.appendChild(diffToggle);
       diffHeader.appendChild(diffLabel);
@@ -162,7 +163,7 @@ function renderIterations() {
         const isHidden = diffContent.style.display === 'none';
         diffContent.style.display = isHidden ? 'block' : 'none';
         diffToggle.style.transform = isHidden ? 'rotate(90deg)' : '';
-        diffLabel.textContent = isHidden ? 'Hide diff (◕‿◕)' : 'View diff ✨';
+        diffLabel.textContent = isHidden ? 'Hide diff' : 'View diff';
       });
 
       item.appendChild(diffContainer);

@@ -85,7 +85,7 @@ function createTreeNode(nodeData, allNodes, pathSet) {
 
   const toggle = document.createElement('span');
   toggle.className = 'tree-toggle';
-  toggle.textContent = hasChildren ? (isNodeExpanded(nodeData.id) ? '▼' : '▶') : '';
+  toggle.textContent = hasChildren ? (isNodeExpanded(nodeData.id) ? '⌄' : '›') : '';
 
   const dot = document.createElement('span');
   dot.className = 'tree-dot';
@@ -98,6 +98,15 @@ function createTreeNode(nodeData, allNodes, pathSet) {
   const depthBadge = document.createElement('span');
   depthBadge.className = 'tree-depth-badge';
   depthBadge.textContent = `D${nodeData.depth}`;
+
+  // Root sparkle badge
+  let rootBadge = null;
+  if (nodeData.stage === 'root') {
+    rootBadge = document.createElement('span');
+    rootBadge.className = 'tree-depth-badge';
+    rootBadge.style.cssText = 'background:var(--accent-pink-dim);color:var(--accent-pink);';
+    rootBadge.textContent = '\uD83C\uDF38';
+  }
 
   // Compact label — just the short ID
   const label = document.createElement('span');
@@ -184,6 +193,7 @@ function createTreeNode(nodeData, allNodes, pathSet) {
   header.appendChild(stageEmoji);
 
   header.appendChild(depthBadge);
+  if (rootBadge) header.appendChild(rootBadge);
   header.appendChild(label);
   header.appendChild(score);
   if (arrowEl) header.appendChild(arrowEl);
@@ -218,7 +228,7 @@ function createTreeNode(nodeData, allNodes, pathSet) {
       e.stopPropagation();
       toggleNode(nodeData.id);
       const isCollapsed = childrenContainer.classList.toggle('collapsed');
-      toggle.textContent = isCollapsed ? '▶' : '▼';
+      toggle.textContent = isCollapsed ? '›' : '⌄';
 
       // Update child count badge
       if (childCountBadge) {
@@ -248,7 +258,7 @@ function renderTree() {
   container.innerHTML = '';
 
   if (nodes.length === 0) {
-    container.innerHTML = '<p style="color:var(--text-muted); padding:16px;">No tree data available~ (｡•́︿•̀｡)</p>';
+    container.innerHTML = '<p style="color:var(--text-muted); padding:16px; text-align:center;">No tree data yet~ (｡•́︿•̀｡) <br><span style="font-size:11px;opacity:0.6;">the tree is sleeping... 🌸💤</span></p>';
     return;
   }
 
