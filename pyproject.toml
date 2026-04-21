@@ -1,0 +1,33 @@
+[project]
+name = "evorun"
+version = "0.1.0"
+description = "LLM-driven iterative codebase optimization with Monte Carlo Tree Search"
+requires-python = ">=3.10"
+dependencies = [
+    "dataclasses-json",
+    "numpy",
+    "pyyaml",
+    "tomli; python_version < '3.11'",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+evorun = "evorun:main"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.dependencies]
+numpy = "*"
+pyyaml = "*"
+tomli = "*"
+
+[tool.hatch.build]
+include = ["evorun/webapp/**/*"]
+
+[tool.pixi.pypi-dependencies]
+evorun = { path = ".", editable = true }

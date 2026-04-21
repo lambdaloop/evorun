@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Evorun — Tree Search Visualizer ✨</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/diff-match-patch@1.0.2/dist/diff_match_patch.umd.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Evorun Snapshot Visualizer ✨🌸</h1>
+      <div id="file-drop-zone">
+        <input type="file" id="file-input" accept=".json" hidden>
+        <button id="browse-btn">Load .evorun_state.json ✨</button>
+        <p>or drag and drop a state file here~ (◕‿◕)</p>
+      </div>
+    </header>
+
+    <main id="dashboard" style="display:none">
+      <!-- Summary bar -->
+      <section id="summary-bar">
+        <div class="summary-card">
+          <span class="label">Iterations</span>
+          <span class="value" id="sum-iterations">-</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Best Score</span>
+          <span class="value" id="sum-best-score">-</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Best Iteration</span>
+          <span class="value" id="sum-best-iter">-</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Tree Nodes</span>
+          <span class="value" id="sum-nodes">-</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Max Depth</span>
+          <span class="value" id="sum-depth">-</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Maximize</span>
+          <span class="value" id="sum-maximize">-</span>
+        </div>
+      </section>
+
+      <!-- Score chart -->
+      <section id="chart-section">
+        <h2>Score Progression ✨</h2>
+        <div class="chart-container">
+          <canvas id="score-chart"></canvas>
+        </div>
+      </section>
+
+      <!-- Tree + Iterations layout -->
+      <div id="split-view">
+        <!-- Tree panel -->
+        <section id="tree-panel">
+          <h2>MCTS Tree 🌳</h2>
+          <div class="tree-controls">
+            <button id="expand-all">Expand All ✨</button>
+            <button id="collapse-all">Collapse All 🌸</button>
+          </div>
+          <div id="tree-container"></div>
+        </section>
+
+        <!-- Iterations panel -->
+        <section id="iterations-panel">
+          <h2>Iterations 📋</h2>
+          <div id="iterations-list"></div>
+        </section>
+      </div>
+
+      <!-- Node details section -->
+      <section id="diff-section" style="display:none">
+        <h2>Node Details ✏️</h2>
+        <div class="diff-controls">
+          <button id="close-diff" style="display:none">Close (◕‿◕)</button>
+        </div>
+        <div id="diff-output" class="diff-output"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="js/state-loader.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/tree-viz.js"></script>
+  <script src="js/diff-viewer.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
