@@ -353,7 +353,7 @@ function showNodeDetailToBottom(nodeData) {
   const nodes = StateLoader.getNodesByStep();
   const parent = nodes.find((n) => n.id === nodeData.parent_id);
   const maximize = StateLoader.getMaximize();
-  if (parent?.score !== null && nodeData.score !== null) {
+  if (parent && parent.score !== null && nodeData.score !== null) {
     const delta = nodeData.score - parent.score;
     const isImprovement = maximize ? delta > 0 : delta < 0;
     const isDegradation = maximize ? delta < 0 : delta > 0;
@@ -361,7 +361,7 @@ function showNodeDetailToBottom(nodeData) {
     html += `<p style="color:${deltaColor}; padding:4px 0; font-size:13px;font-weight:600;">Score: ${parent.score.toFixed(4)} → ${nodeData.score.toFixed(4)} (${delta > 0 ? '+' : ''}${delta.toFixed(4)})</p>`;
   } else if (nodeData.score !== null) {
     html += `<p style="color:var(--text-secondary); padding:4px 0; font-size:13px;">Score: ${nodeData.score.toFixed(4)}</p>`;
-  } else if (parent?.score !== null) {
+  } else if (parent && parent.score !== null) {
     html += `<p style="color:var(--accent-peach); padding:4px 0; font-size:13px;">Score: ${parent.score.toFixed(4)} → N/A</p>`;
   }
 
