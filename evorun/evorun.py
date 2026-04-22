@@ -145,6 +145,10 @@ class HistoryEntry:
     llm_response: str = ""
     edit_summary: str = ""
     diff_text: str = ""
+    planner_input: str = ""
+    planner_output: str = ""
+    editor_input: str = ""
+    editor_output: str = ""
 
 
 # ────────────────────────────────────────────────────────────
@@ -797,8 +801,11 @@ class EvoRunAgent:
                 llm_response=e.get("llm_response", ""),
                 edit_summary=e.get("edit_summary", ""),
                 diff_text=e.get("diff_text", ""),
+                planner_input=e.get("planner_input", ""),
+                planner_output=e.get("planner_output", ""),
+                editor_input=e.get("editor_input", ""),
+                editor_output=e.get("editor_output", ""),
             )
-            h.claude_log = e.get("claude_log", "")
             h.claude_feedback = e.get("claude_feedback", "")
             all_history.append(h)
         # Only keep history from the current session (iterations < next_iteration)
@@ -994,7 +1001,7 @@ class EvoRunAgent:
         needs_fix = len(review_notes) > 0
         return needs_fix, "\n".join(review_notes)
 
-    def _run_planner(self, feedback: str) -> str:
+    def _run_planner(self, feedback: str) -> tuple[str, str]:
         """Run the planner stage: analyze feedback and produce a free-form plan.
 
         The planner reads the full feedback prompt and outputs a natural-language
@@ -1005,7 +1012,7 @@ class EvoRunAgent:
             feedback: The formatted feedback string from _format_feedback().
 
         Returns:
-            Free-form text plan or empty string if planning fails.
+            (planner_input_prompt, plan_text) — full prompt sent and output received.
         """
         planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
         planner_prompt = f"""\
@@ -1052,20 +1059,20 @@ Produce a concise plan following this structure.
                 env_overrides=planner_env,
                 max_turns=30,
                 allowed_tools=[],
-                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
                 print_output=False,
             )
             if self._check_rate_limit(result):
-                return ""
-            return result.strip()
+                return (planner_prompt, "")
+            return (planner_prompt, result.strip())
         except Exception as e:
             _run_logger.warning(f"Planner failed (iter {self._iteration}): {e}")
-            return ""
+            return (planner_prompt, "")
 
-    def _run_editor(self, plan: str, feedback: str) -> str:
+    def _run_editor(self, plan: str, feedback: str) -> tuple[str, str]:
         """Run the editor stage: execute the plan by writing actual code.
 
         The editor receives the plan from the planner, reads the relevant files
@@ -1076,7 +1083,7 @@ Produce a concise plan following this structure.
             feedback: The full feedback for context (scores, eval output, etc.).
 
         Returns:
-            The raw claude CLI output (tool use logs).
+            (editor_input_prompt, cli_output) — full prompt sent and output received.
         """
         editor_env = _build_claude_env(self.editor_provider, self.editor_model, self.editor_api_key)
         editor_prompt = f"""\
@@ -1110,20 +1117,20 @@ You are a senior Python developer implementing a code improvement plan.
                 env_overrides=editor_env,
                 max_turns=500,
                 allowed_tools=['Read', 'Edit', 'Write'],
-                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
                 print_output=False,
             )
             if self._check_rate_limit(result):
-                return ""
-            return result
+                return (editor_prompt, "")
+            return (editor_prompt, result)
         except Exception as e:
             _run_logger.warning(f"Editor failed (iter {self._iteration}): {e}")
-            return ""
+            return (editor_prompt, "")
 
-    def _run_error_planner(self, result: EvalResult) -> str:
+    def _run_error_planner(self, result: EvalResult) -> tuple[str, str]:
         """Analyze evaluation errors and produce a fix plan.
 
         Two-stage planner for broken nodes: analyzes the error and
@@ -1133,7 +1140,7 @@ You are a senior Python developer implementing a code improvement plan.
             result: Eval result with error information.
 
         Returns:
-            Free-form fix plan or empty string if planning fails.
+            (planner_input_prompt, fix_plan) — full prompt sent and output received.
         """
         error_context = []
         if result.timed_out:
@@ -1183,20 +1190,20 @@ Produce a concise fix plan following this structure.
                 env_overrides=planner_env,
                 max_turns=30,
                 allowed_tools=[],
-                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
                 print_output=False,
             )
             if self._check_rate_limit(result):
-                return ""
-            return result.strip()
+                return (planner_prompt, "")
+            return (planner_prompt, result.strip())
         except Exception as e:
             _run_logger.warning(f"Error planner failed (iter {self._iteration}): {e}")
-            return ""
+            return (planner_prompt, "")
 
-    def _run_error_editor(self, fix_plan: str, result: EvalResult) -> str:
+    def _run_error_editor(self, fix_plan: str, result: EvalResult) -> tuple[str, str]:
         """Execute error fixes based on the planner's fix plan.
 
         Two-stage editor for broken nodes: receives the fix plan from the
@@ -1207,7 +1214,7 @@ Produce a concise fix plan following this structure.
             result: Eval result with error information.
 
         Returns:
-            The raw claude CLI output (tool use logs).
+            (editor_input_prompt, cli_output) — full prompt sent and output received.
         """
         error_context = []
         if result.timed_out:
@@ -1259,18 +1266,18 @@ Do not try to improve the score — just fix the errors.
                 env_overrides=editor_env,
                 max_turns=500,
                 allowed_tools=['Read', 'Edit', 'Write'],
-                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
                 print_output=False,
             )
             if self._check_rate_limit(result):
-                return ""
-            return result
+                return (editor_prompt, "")
+            return (editor_prompt, result)
         except Exception as e:
             _run_logger.warning(f"Error editor failed (iter {self._iteration}): {e}")
-            return ""
+            return (editor_prompt, "")
 
     # ─── Main entry point ────────────────────────────────────────
 
@@ -1536,6 +1543,8 @@ Do not try to improve the score — just fix the errors.
 
         log_content: str = ""
         planner_output: str = ""
+        planner_input: str = ""
+        editor_input: str = ""
         modified_files: list[str] = []
         added_files: list[str] = []
         deleted_files: list[str] = []
@@ -1555,9 +1564,11 @@ Do not try to improve the score — just fix the errors.
             if do_fusion:
                 # Try cross-branch fusion first
                 _run_logger.info(f"[Iter {self._iteration}] Trying cross-branch fusion...")
-                fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion = \
+                fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input = \
                     self._run_fusion(target_node)
                 planner_output = fusion_plan
+                planner_input = fusion_planner_input
+                editor_input = fusion_editor_input
 
         # Fix error path for broken nodes — two-stage: error planner → error editor
         if not self.fake_run and is_broken and not used_fusion:
@@ -1566,11 +1577,13 @@ Do not try to improve the score — just fix the errors.
                 self.codebase.get_experiment_files(),
             )
 
-            plan = self._run_error_planner(result)
+            error_planner_input, plan = self._run_error_planner(result)
             planner_output = plan
+            editor_input = ""
             if plan and plan.strip():
                 _run_logger.info(f"[Iter {self._iteration}] Running error editor with fix plan...")
-                log_content = self._run_error_editor(plan, result)
+                error_editor_input, log_content = self._run_error_editor(plan, result)
+                editor_input = error_editor_input
                 if log_content:
                     _run_logger.info(
                         f"[Claude] Error editor output: {len(log_content)} chars"
@@ -1580,6 +1593,9 @@ Do not try to improve the score — just fix the errors.
                     f"[Iter {self._iteration}] Error planner produced empty plan — skipping error fix"
                 )
                 log_content = ""
+
+            planner_input = error_planner_input
+            editor_input = error_editor_input
 
         # Build feedback (always, for logging and next iteration)
         parent_score = target_node.parent.metric.value if target_node.parent and target_node.parent.metric else None
@@ -1593,11 +1609,12 @@ Do not try to improve the score — just fix the errors.
                     self.codebase.get_experiment_files(),
                 )
 
-                plan = self._run_planner(feedback)
+                planner_input, plan = self._run_planner(feedback)
                 planner_output = plan
+                editor_input = ""
                 if plan and plan.strip():
                     _run_logger.info(f"[Iter {self._iteration}] Running editor with plan...")
-                    log_content = self._run_editor(plan, feedback)
+                    editor_input, log_content = self._run_editor(plan, feedback)
                     if log_content:
                         _run_logger.info(
                             f"[Claude] Editor output: {len(log_content)} chars"
@@ -1646,7 +1663,7 @@ Do not try to improve the score — just fix the errors.
                 if self._consecutive_no_changes >= MAX_CONSECUTIVE_NO_CHANGES:
                     _run_logger.warning(
                         f"[Claude] No changes for {self._consecutive_no_changes} "
-                        f"consecutive iterations. Check .evorun_claude.log for debug info."
+                        f"consecutive iterations. Check .evorun_planner_output for debug info."
                     )
             # Store for next iteration's feedback.
             self._last_modified_files = modified_files
@@ -1883,8 +1900,11 @@ Do not try to improve the score — just fix the errors.
             llm_response=(log_content or "").strip(),
             edit_summary=edit_summary,
             diff_text=diff_text,
+            planner_input=(planner_input or "").strip(),
+            planner_output=(planner_output or "").strip(),
+            editor_input=(editor_input or "").strip(),
+            editor_output=(log_content or "").strip(),
         ))
-        self.history[-1].claude_log = planner_output or ""
         self.history[-1].claude_feedback = feedback or ""
 
         # Update global best if child score improves (respects optim-mode).
@@ -2035,7 +2055,10 @@ Do not try to improve the score — just fix the errors.
                 "llm_response": e.llm_response[:MAX_LLM_RESPONSE_SUMMARY],
                 "edit_summary": e.edit_summary,
                 "diff_text": e.diff_text,
-                "claude_log": getattr(e, "claude_log", ""),
+                "planner_input": e.planner_input,
+                "planner_output": e.planner_output,
+                "editor_input": e.editor_input,
+                "editor_output": e.editor_output,
                 "claude_feedback": getattr(e, "claude_feedback", ""),
             })
         # Derive next_iteration from tree structure to stay in sync with history
@@ -2521,14 +2544,14 @@ Do not try to improve the score — just fix the errors.
             target_node: The SearchNode being expanded.
 
         Returns:
-            Tuple of (fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion).
+            Tuple of (fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input).
         """
         candidates = self._find_fusion_candidates(target_node, max_candidates=2)
 
         # No candidates at all — can't do fusion or fallback
         if not candidates:
             _run_logger.info(f"[Fusion] No candidates found for node {target_node.id[:8]}")
-            return None, "", [], [], [], False
+            return None, "", [], [], [], False, "", ""
 
         # Build reference trajectories (as diffs vs target)
         reference_sections = []
@@ -2599,6 +2622,7 @@ One well-integrated technique is better than a messy combination of several.
 Produce a concise fusion plan following this structure.
 """
         fusion_plan = ""
+        fusion_planner_input = fusion_feedback
         try:
             fusion_planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
             fusion_plan_raw = _run_claude_cli_with_env(
@@ -2608,7 +2632,7 @@ Produce a concise fusion plan following this structure.
                 env_overrides=fusion_planner_env,
                 max_turns=30,
                 allowed_tools=[],
-                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
                 retries=2,
                 retry_base_delay=3.0,
                 stage="planner",
@@ -2623,7 +2647,7 @@ Produce a concise fusion plan following this structure.
         if fusion_plan and fusion_plan.strip():
             # Fusion editor
             fusion_editor_env = _build_claude_env(self.editor_provider, self.editor_model, self.editor_api_key)
-            fusion_editor_prompt = f"""\
+            fusion_editor_input = f"""\
 You are implementing a cross-branch fusion plan.
 
 ## Fusion Plan
@@ -2654,13 +2678,13 @@ a messy combination of several.
 """
             try:
                 log_content = _run_claude_cli_with_env(
-                    prompt=fusion_editor_prompt,
+                    prompt=fusion_editor_input,
                     cwd=str(self.codebase.codebase_dir),
                     model=self.editor_model,
                     env_overrides=fusion_editor_env,
                     max_turns=500,
                     allowed_tools=['Read', 'Edit', 'Write'],
-                    log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                    log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
                     retries=2,
                     retry_base_delay=3.0,
                     stage="editor",
@@ -2693,7 +2717,7 @@ a messy combination of several.
         else:
             _run_logger.info(f"[Fusion] Fusion produced no changes — falling back to normal Claude")
 
-        return fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion
+        return fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input
 
     def _format_file_changes(self) -> list[str]:
         """Format file changes section if any files were modified/added/deleted.
@@ -3673,7 +3697,7 @@ def main() -> None:
             ".evorun_state.json",
             ".evorun_backup",
             ".evorun_snapshots",
-            ".evorun_claude.log",
+            ".evorun_planner_output",
         ]
         for name in _evorun_artifacts:
             p = codebase_root / name
