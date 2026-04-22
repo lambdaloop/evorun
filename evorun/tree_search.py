@@ -20,12 +20,12 @@ Key improvements over the original implementation:
 import bisect
 import logging
 import math
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 from evorun.engine.search_node import Journal, SearchNode
 from evorun.utils.metric import MetricValue
 
-logger = logging.getLogger("simple_run")
+logger = logging.getLogger("evorun")
 
 # Maximum number of child expansions per non-root node before it's
 # considered "fully expanded" (for stopping the search on that branch).
@@ -90,7 +90,7 @@ class TreeSearch:
 
         # Reward normalization (percentile rank)
         self._reward_count = 0
-        self._scores: list[float] = []  #(sorted list of all seen raw scores
+        self._scores: list[float] = []  # sorted list of all seen raw scores
 
         # Per-branch expansion tracking (branch = root-child subtree)
         self._branch_expansions: dict[str, int] = {}  # branch_id -> total expansions
@@ -212,7 +212,7 @@ class TreeSearch:
 
         # Broken node bonus — decays with visits so the node gets tried
         # early but doesn't dominate long-term selection.
-        if not node.metric or (node.metric is not None and node.metric.value is None):
+        if not node.metric or node.metric.value is None:
             exploration += self.explore_c * 2.0 / max(node.visits, 1)
 
         uct: float = mean_reward + exploration
@@ -304,8 +304,6 @@ class TreeSearch:
 
         # Compute normalized reward.
         reward: float = self._normalize_reward(score)
-        child._reward = reward
-
         # Book-keeping.
         self.journal.append(child)
 
@@ -501,7 +499,7 @@ class TreeSearch:
         for nd in data["nodes"]:
             if nd["id"] == self.root.id:
                 continue
-            node = SearchNode(code="", plan=f"improve from saved node",
+            node = SearchNode(code="", plan="improve from saved node",
                               stage=nd["stage"], parent=None)
             node.id = nd["id"]
             node.visits = nd["visits"]

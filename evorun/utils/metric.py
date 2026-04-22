@@ -65,18 +65,3 @@ class MetricValue(DataClassJsonMixin):
         return self.value if self.value is not None else float("nan")
 
 
-@dataclass
-class WorstMetricValue(MetricValue):
-    """
-    Represents an invalid metric value, e.g. when the agent creates a buggy solution.
-    Always compares worse than any valid metric value.
-    """
-
-    value: None = None
-
-    def __repr__(self):
-        return super().__repr__()
-
-    def __str__(self):
-        return super().__str__()
-    

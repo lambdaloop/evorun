@@ -694,11 +694,9 @@ class EvoRunAgent:
         self.history: list[HistoryEntry] = []
         self.consecutive_timeouts: int = 0
 
-        # Per-parent stagnation tracking (overrides global counter).
+        # Per-parent stagnation tracking.
         # Keyed by parent node ID — tracks consecutive non-improving children.
         self._parent_stagnation: dict[str, int] = {}
-        # Legacy per-branch tracking (kept for state file backward compat).
-        self._branch_stagnation: dict[int, int] = {}
 
         # State and resume
         self.state_path = self.codebase.codebase_dir / ".evorun_state.json"
@@ -818,15 +816,9 @@ class EvoRunAgent:
         self._best_snapshot_dir = data.get("best_snapshot_iteration")
         self.consecutive_timeouts = data.get("consecutive_timeouts", 0)
 
-        # Restore per-parent stagnation tracking (primary).
+        # Restore per-parent stagnation tracking.
         parent_stag_data = data.get("parent_stagnation", {})
         self._parent_stagnation = {k: v for k, v in parent_stag_data.items()}
-        # Restore legacy per-branch stagnation tracking (backward compat).
-        self._branch_stagnation = {}
-        branch_stag_data = data.get("branch_stagnation", {})
-        self._branch_stagnation = {
-            int(k) if str(k).isdigit() else k: v for k, v in branch_stag_data.items()
-        }
 
         # Restore tree search state.
         ts_data = data.get("tree_structure")
@@ -1165,6 +1157,10 @@ You are a senior Python developer implementing a code improvement plan.
         error_text = "\n".join(error_context)
 
         planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
+        task_section = (
+            f"## Task\n{self.codebase._task_content}\n\n"
+            if self.codebase._task_content else ""
+        )
         planner_prompt = f"""\
 You are a code planning architect. Your job is to analyze evaluation errors
 and produce a plan for what changes to make to fix them.
@@ -1175,7 +1171,7 @@ IMPORTANT RULES:
 3. Describe changes in plain language — the editor will implement them.
 4. Use the Read tool to read the files implicated by the error before planning.
 
-## Error
+{task_section}## Error
 {error_text}
 
 ## Instructions
@@ -1304,7 +1300,6 @@ Do not try to improve the score — just fix the errors.
         Returns:
             None.  Exit status is logged and best snapshot is restored.
     """
-        import evorun.utils.response as utils
         # Seed and initialize.
         self._attempt_resume()
 
@@ -1356,7 +1351,7 @@ Do not try to improve the score — just fix the errors.
             _run_logger.info("[Mode] Fake run — no eval or LLM calls, just random scores")
 
         if self._best_snapshot_dir:
-            _run_logger.info(f"[Exit] Restoring best checkpoint...")
+            _run_logger.info("[Exit] Restoring best checkpoint...")
             self._restore_snapshot(self._best_snapshot_dir)
         else:
             _run_logger.info("[Exit] No valid scores achieved. Codebase unchanged.")
@@ -1387,7 +1382,7 @@ Do not try to improve the score — just fix the errors.
             f"[Iter {self._iteration + 1}/{self.max_iters}] "
             f"Tree search: selected node {target_node.id[:8]} "
             f"(Q={avg_reward:.4f}, children={target_node.num_children}, "
-            f"depth={self._node_depth(target_node)})"
+            f"depth={self.tree._node_depth(target_node)})"
         )
 
         # Update decay exploration constant
@@ -1531,11 +1526,6 @@ Do not try to improve the score — just fix the errors.
 
         # ---- Step 4: Code review disabled (false-positive rate too high) ----
         code_review_notes = ""
-
-        # Compute parent_id early — used by stagnation tracking.
-        # Stagnation is keyed by the node being expanded (target_node.id),
-        # since we are tracking how many non-improving children it produces.
-        parent_id = target_node.id
 
         # ---- Step 5: Code generation (fusion or normal Claude) ----
         tree_info = self.tree.get_node_info()
@@ -1686,9 +1676,12 @@ Do not try to improve the score — just fix the errors.
         if used_fusion:
             if modified_files or added_files or deleted_files:
                 _run_logger.info("[Fusion] Code modified:")
-                for f in modified_files: _run_logger.info(f"  ~ {f}")
-                for f in added_files: _run_logger.info(f"  + {f}")
-                for f in deleted_files: _run_logger.info(f"  - {f}")
+                for f in modified_files:
+                    _run_logger.info(f"  ~ {f}")
+                for f in added_files:
+                    _run_logger.info(f"  + {f}")
+                for f in deleted_files:
+                    _run_logger.info(f"  - {f}")
                 self._consecutive_no_changes = 0
             else:
                 _run_logger.info("[Fusion] No changes detected")
@@ -1710,7 +1703,7 @@ Do not try to improve the score — just fix the errors.
                 f"[Claude] Response preview: {log_content[:500]}..."
             )
         elif feedback and not self.fake_run:
-            _run_logger.warning(f"[Claude] No response received from LLM")
+            _run_logger.warning("[Claude] No response received from LLM")
 
         # Compute diff text synchronously (lightweight).
         diff_text = ""
@@ -1736,10 +1729,6 @@ Do not try to improve the score — just fix the errors.
         edit_summary = ""
         if diff_text:
             self._submit_edit_summary(diff_text, self._iteration)
-
-        # Save the full LLM response to seed history (compact).
-        llm_response = (log_content or "").strip()
-        llm_response_short = llm_response
 
         # ---- Step 6: Run eval on improved code (child score) ----
         child_score: float | None = None
@@ -1975,15 +1964,6 @@ Do not try to improve the score — just fix the errors.
         self.save_state()
         self._iteration += 1
 
-    def _node_depth(self, node: Any) -> int:
-        """Return depth of node from root (root = 0)."""
-        depth = 0
-        current = node
-        while current.parent is not None:
-            depth += 1
-            current = current.parent
-        return depth
-
     @staticmethod
     def _parse_eval_description(description: str) -> list[tuple[str, float]]:
         """Parse key=value and key: value pairs from an eval description string.
@@ -1997,13 +1977,11 @@ Do not try to improve the score — just fix the errors.
         metrics: list[tuple[str, float]] = []
         parts = description.replace(",", " ").split()
         for part in parts:
-            parsed = False
             for sep in [":", "="]:
                 if sep in part:
                     name, value = part.split(sep, 1)
                     try:
                         metrics.append((name.strip(), float(value)))
-                        parsed = True
                         break
                     except ValueError:
                         continue
@@ -2085,11 +2063,7 @@ Do not try to improve the score — just fix the errors.
             "consecutive_timeouts": self.consecutive_timeouts,
             "history": history_entries,
         }
-        # Include parent stagnation (primary) and branch stagnation (legacy).
-        parent_stagnation = {k: v for k, v in self._parent_stagnation.items()}
-        data["parent_stagnation"] = parent_stagnation
-        branch_stagnation = {str(k): v for k, v in self._branch_stagnation.items()}
-        data["branch_stagnation"] = branch_stagnation
+        data["parent_stagnation"] = dict(self._parent_stagnation)
         # Full tree state.
         data["tree_structure"] = self.tree.get_tree_structure()
 
@@ -2291,7 +2265,7 @@ Do not try to improve the score — just fix the errors.
                 new_lines = f.readlines()
             diff = difflib.unified_diff(
                 [], new_lines,
-                fromfile=f"/dev/null",
+                fromfile="/dev/null",
                 tofile=f"current/{rel_file}",
             )
             diffs.append("".join(diff))
@@ -2306,7 +2280,7 @@ Do not try to improve the score — just fix the errors.
             diff = difflib.unified_diff(
                 old_lines, [],
                 fromfile=f"snapshot/{rel_file}",
-                tofile=f"/dev/null",
+                tofile="/dev/null",
             )
             diffs.append("".join(diff))
 
@@ -2634,6 +2608,10 @@ Do not try to improve the score — just fix the errors.
         prev_hashes = self._compute_file_hashes(self.codebase.get_experiment_files())
 
         # Fusion planner
+        fusion_task_section = (
+            f"## Task\n{self.codebase._task_content}\n\n"
+            if self.codebase._task_content else ""
+        )
         fusion_feedback = f"""\
 ### Cross-Branch Fusion Context
 
@@ -2646,7 +2624,7 @@ IMPORTANT RULES:
 2. Describe changes in plain language — the editor will implement them.
 3. Use the Read tool to inspect current files if you need more context.
 
-## Required Analysis
+{fusion_task_section}## Required Analysis
 
 **Reference Analysis** — For each reference diff:
 - What does this reference do differently from the target?
@@ -2770,7 +2748,7 @@ a messy combination of several.
             _run_logger.info(f"[Fusion] Fusion successful: {len(modified_files)} modified, "
                            f"{len(added_files)} added, {len(deleted_files)} deleted")
         else:
-            _run_logger.info(f"[Fusion] Fusion produced no changes — falling back to normal Claude")
+            _run_logger.info("[Fusion] Fusion produced no changes — falling back to normal Claude")
 
         return fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input
 
@@ -3101,16 +3079,14 @@ a messy combination of several.
             time_str = f" [{ts}]" if ts else ""
             if entry.timed_out:
                 line = f"Iter {entry.iter}: timed out ({et:.0f}s){time_str}"
-                if file_str: line += f" [{file_str}]"
-                if summary: line += f" [{summary}]"
             elif entry.score is not None:
                 line = f"Iter {entry.iter}: score={entry.score:.4f} ({et:.0f}s){time_str}"
-                if file_str: line += f" [{file_str}]"
-                if summary: line += f" [{summary}]"
             else:
                 line = f"Iter {entry.iter}: no score ({et:.0f}s){time_str}"
-                if file_str: line += f" [{file_str}]"
-                if summary: line += f" [{summary}]"
+            if file_str:
+                line += f" [{file_str}]"
+            if summary:
+                line += f" [{summary}]"
             history_lines.append(line)
         return history_lines
 

@@ -5,8 +5,6 @@ methods used by evorun.py and tree_search.py are kept.
 """
 
 import logging
-import math
-import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -24,30 +22,27 @@ class SearchNode(DataClassJsonMixin):
 
     # ---- code & plan ----
     code: str
-    plan: str = field(default=None, kw_only=True)  # type: ignore
+    plan: Optional[str] = field(default=None, kw_only=True)
 
     # ---- general attrs ----
-    step: int = field(default=None, kw_only=True)  # type: ignore
+    step: Optional[int] = field(default=None, kw_only=True)
     id: str = field(default_factory=lambda: uuid.uuid4().hex, kw_only=True)
     ctime: float = field(default_factory=lambda: time.time(), kw_only=True)
     parent: Optional["SearchNode"] = field(default=None, kw_only=True)
     children: set["SearchNode"] = field(default_factory=set, kw_only=True)
 
     # ---- execution info ----
-    _term_out: list[str] = field(default=None, kw_only=True)  # type: ignore
-    exec_time: float = field(default=None, kw_only=True)  # type: ignore
+    _term_out: Optional[list[str]] = field(default=None, kw_only=True)
+    exec_time: Optional[float] = field(default=None, kw_only=True)
 
     # ---- evaluation ----
-    metric: MetricValue = field(default=None, kw_only=True)  # type: ignore
-    is_buggy: bool = field(default=None, kw_only=True)  # type: ignore
+    metric: Optional[MetricValue] = field(default=None, kw_only=True)
 
     # ---- search / MCTS ----
     stage: str  # "root", "improve", "debug", etc.
     visits: int = field(default=0, kw_only=True)
     total_reward: float = field(default=0.0, kw_only=True)
-    _uct: float = field(default=0.0, kw_only=True)
     branch_id: Optional[int] = field(default=None, kw_only=True)
-    code_summary: Optional[str] = field(default=None, kw_only=True)
     eval_output: str = field(default="", kw_only=True)
 
     def __post_init__(self) -> None:

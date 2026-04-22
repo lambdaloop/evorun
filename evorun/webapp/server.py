@@ -14,7 +14,6 @@ import http.server
 import json
 import math
 import os
-import sys
 import threading
 import webbrowser
 from pathlib import Path
