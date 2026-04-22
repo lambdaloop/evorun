@@ -513,8 +513,7 @@ class TreeSearch:
             node.branch_id = nd["branch_id"]
             node.step = nd["step"]
             node.eval_output = nd.get("eval_output", "")
-            if nd["score"] is not None:
-                node.metric = MetricValue(value=nd["score"], maximize=self.maximize)
+            node.metric = MetricValue(value=nd["score"], maximize=self.maximize)
             node_map[node.id] = node
             self.journal.append(node)
 

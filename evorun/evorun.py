@@ -1120,6 +1120,155 @@ You are a senior Python developer implementing a code improvement plan.
             _run_logger.warning(f"Editor failed (iter {self._iteration}): {e}")
             return ""
 
+    def _run_error_planner(self, result: EvalResult) -> str:
+        """Analyze evaluation errors and produce a fix plan.
+
+        Two-stage planner for broken nodes: analyzes the error and
+        describes WHAT to fix without writing code.
+
+        Args:
+            result: Eval result with error information.
+
+        Returns:
+            Free-form fix plan or empty string if planning fails.
+        """
+        error_context = []
+        if result.timed_out:
+            error_context.append("**Issue**: Evaluation timed out")
+            error_context.append("**Action**: Check for infinite loops, expensive operations, or blocking I/O")
+        elif result.had_error:
+            error_context.append("**Issue**: Evaluation failed with error")
+        elif result.exit_code is not None and result.exit_code != 0:
+            error_context.append(f"**Issue**: Evaluation exited with code {result.exit_code}")
+            error_context.append("**Action**: Check the error output and fix the issue")
+
+        if result.output:
+            error_context.append("\n### Error Output\n")
+            error_context.append("```")
+            for line in result.output[:30]:
+                error_context.append(str(line)[:200])
+            error_context.append("```")
+
+        error_text = "\n".join(error_context)
+
+        planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
+        planner_prompt = f"""\
+You are a code planning architect. Your job is to analyze evaluation errors
+and produce a plan for what changes to make to fix them.
+
+IMPORTANT RULES:
+1. Do NOT write any code. Do NOT use Read, Edit, or Write tools.
+2. Do NOT produce diffs or file content.
+3. Describe changes in plain language — the editor will implement them.
+
+## Error
+{error_text}
+
+## Instructions
+1. Analyze the error output above.
+2. Identify the root cause of the failure.
+3. List the specific files and code sections that need to be changed.
+4. Describe what each change should accomplish.
+
+Produce a concise fix plan following this structure.
+"""
+        try:
+            result = _run_claude_cli_with_env(
+                prompt=planner_prompt,
+                cwd=str(self.codebase.codebase_dir),
+                model=self.planner_model,
+                env_overrides=planner_env,
+                max_turns=30,
+                allowed_tools=[],
+                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                retries=getattr(self, 'llm_retries', 3),
+                retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+                stage="planner",
+                print_output=False,
+            )
+            if self._check_rate_limit(result):
+                return ""
+            return result.strip()
+        except Exception as e:
+            _run_logger.warning(f"Error planner failed (iter {self._iteration}): {e}")
+            return ""
+
+    def _run_error_editor(self, fix_plan: str, result: EvalResult) -> str:
+        """Execute error fixes based on the planner's fix plan.
+
+        Two-stage editor for broken nodes: receives the fix plan from the
+        error planner and writes the actual code to fix the errors.
+
+        Args:
+            fix_plan: The fix plan from the error planner.
+            result: Eval result with error information.
+
+        Returns:
+            The raw claude CLI output (tool use logs).
+        """
+        error_context = []
+        if result.timed_out:
+            error_context.append("**Issue**: Evaluation timed out")
+            error_context.append("**Action**: Check for infinite loops, expensive operations, or blocking I/O")
+        elif result.had_error:
+            error_context.append("**Issue**: Evaluation failed with error")
+        elif result.exit_code is not None and result.exit_code != 0:
+            error_context.append(f"**Issue**: Evaluation exited with code {result.exit_code}")
+            error_context.append("**Action**: Check the error output and fix the issue")
+
+        if result.output:
+            error_context.append("\n### Error Output\n")
+            error_context.append("```")
+            for line in result.output[:30]:
+                error_context.append(str(line)[:200])
+            error_context.append("```")
+
+        error_text = "\n".join(error_context)
+
+        editor_prompt = f"""\
+You are a senior Python developer fixing errors in the codebase.
+
+## Current Codebase
+{self.codebase.get_codebase_prompt(max_size=4000)}
+
+## Error
+{error_text}
+
+## Fix Plan
+{fix_plan}
+
+## Instructions
+1. Read the files to understand the current code.
+2. Follow the fix plan to correct the errors.
+3. Make sure your changes produce valid, runnable Python code.
+4. Preserve working code that is not related to the error.
+5. Output complete files, not partial diffs.
+
+Do not try to improve the score — just fix the errors.
+"""
+
+        editor_env = _build_claude_env(self.editor_provider, self.editor_model, self.editor_api_key)
+        try:
+            result = _run_claude_cli_with_env(
+                prompt=editor_prompt,
+                cwd=str(self.codebase.codebase_dir),
+                model=self.editor_model,
+                env_overrides=editor_env,
+                max_turns=500,
+                allowed_tools=['Read', 'Edit', 'Write'],
+                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                retries=getattr(self, 'llm_retries', 3),
+                retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+                stage="editor",
+                print_output=False,
+            )
+            if self._check_rate_limit(result):
+                return ""
+            return result
+        except Exception as e:
+            _run_logger.warning(f"Error editor failed (iter {self._iteration}): {e}")
+            return ""
+
     # ─── Main entry point ────────────────────────────────────────
 
     def run(self) -> None:
@@ -1313,12 +1462,14 @@ You are a senior Python developer implementing a code improvement plan.
                     self._best_snapshot_dir = self._save_node_snapshot(target_node, self._iteration)
                     _run_logger.info(f"[Iter {self._iteration}] New best score: {result.score}")
 
-            # If this is the root node (first baseline only), store the score
-            # so subsequent visits skip baseline and proceed to child creation.
-            if target_node is self.tree.root and result.score is not None:
-                target_node.metric = MetricValue(
-                    value=result.score, maximize=self.tree.maximize
-                )
+            # Always record the metric so the node is never re-evaluated.
+            # A metric with value=None means the eval ran but produced no score.
+            target_node.metric = MetricValue(
+                value=result.score, maximize=self.tree.maximize
+            )
+
+            # If this is the root node (first baseline only), save state.
+            if target_node is self.tree.root:
                 # Save state after recording root baseline (no history entry —
                 # the first child expansion at the same iter=0 would collide).
                 self.save_state()
@@ -1389,7 +1540,10 @@ You are a senior Python developer implementing a code improvement plan.
         prev_hashes: dict[str, str] = {}
         used_fusion = False
 
-        if not self.fake_run and self.use_fusion:
+        # Broken nodes skip fusion/improve — run dedicated error fix instead.
+        is_broken = result.score is None
+
+        if not self.fake_run and self.use_fusion and not is_broken:
             # Only use fusion after fusion_min_iters iterations
             if self._iteration >= self.fusion_min_iters:
                 do_fusion = random.random() < self.fusion_prob
@@ -1402,11 +1556,33 @@ You are a senior Python developer implementing a code improvement plan.
                     self._run_fusion(target_node)
                 planner_output = fusion_plan
 
+        # Fix error path for broken nodes — two-stage: error planner → error editor
+        if not self.fake_run and is_broken and not used_fusion:
+            _run_logger.info(f"[Iter {self._iteration}] Sending error to error planner...")
+            prev_hashes = self._compute_file_hashes(
+                self.codebase.get_experiment_files(),
+            )
+
+            plan = self._run_error_planner(result)
+            planner_output = plan
+            if plan and plan.strip():
+                _run_logger.info(f"[Iter {self._iteration}] Running error editor with fix plan...")
+                log_content = self._run_error_editor(plan, result)
+                if log_content:
+                    _run_logger.info(
+                        f"[Claude] Error editor output: {len(log_content)} chars"
+                    )
+            else:
+                _run_logger.warning(
+                    f"[Iter {self._iteration}] Error planner produced empty plan — skipping error fix"
+                )
+                log_content = ""
+
         # Build feedback (always, for logging and next iteration)
         parent_score = target_node.parent.metric.value if target_node.parent and target_node.parent.metric else None
         feedback = self._format_feedback(result, self._iteration, tree_info, prev_eval, code_review_notes, debug_instructions, parent_score)
 
-        if not (used_fusion and log_content) and not self.fake_run:
+        if not (used_fusion and log_content) and not self.fake_run and not is_broken:
             # Two-stage: planner → editor
             if feedback:
                 _run_logger.info(f"[Iter {self._iteration}] Sending feedback to planner...")
@@ -1430,7 +1606,9 @@ You are a senior Python developer implementing a code improvement plan.
                     log_content = ""
             # If feedback is empty, log_content stays empty (no LLM call)
 
-            # Detect actual file changes (hashes only).
+        # Detect actual file changes for error-fix and normal improve paths.
+        # Fusion already returns file changes from _run_fusion.
+        if log_content and not used_fusion and not self.fake_run:
             current_hashes = self._compute_file_hashes(
                 self.codebase.get_experiment_files(),
             )
@@ -1448,7 +1626,10 @@ You are a senior Python developer implementing a code improvement plan.
                     modified_files.append(fpath)
             any_changes = modified_files or added_files or deleted_files
             if any_changes:
-                _run_logger.info("[Claude] Improved code:")
+                if is_broken:
+                    _run_logger.info("[Fix] Fixed errors:")
+                else:
+                    _run_logger.info("[Claude] Improved code:")
                 for f in modified_files:
                     _run_logger.info(f"  ~ {f}")
                 for f in added_files:
