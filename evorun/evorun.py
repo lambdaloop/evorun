@@ -47,6 +47,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import difflib
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -2031,7 +2032,6 @@ You are a senior Python developer implementing a code improvement plan.
         Returns:
             Unified diff text (empty string if no diff or snapshot not found).
         """
-        import difflib
         from pathlib import Path
 
         snap_path = Path(snapshot_dir)
@@ -2086,6 +2086,17 @@ You are a senior Python developer implementing a code improvement plan.
             diffs.append("".join(diff))
 
         return "\n".join(diffs) if diffs else ""
+
+    @staticmethod
+    def _compute_code_diff(old_code: str, new_code: str,
+                           fromfile: str = "target", tofile: str = "ref") -> str:
+        """Compute unified diff between two code strings."""
+        return "".join(difflib.unified_diff(
+            old_code.splitlines(keepends=True),
+            new_code.splitlines(keepends=True),
+            fromfile=fromfile,
+            tofile=tofile,
+        ))
 
     def _submit_edit_summary(
         self,
@@ -2293,7 +2304,7 @@ You are a senior Python developer implementing a code improvement plan.
 
     # ─── Fusion agent ───────────────────────────────────────────────
 
-    def _find_fusion_candidates(self, target_node, max_candidates=3):
+    def _find_fusion_candidates(self, target_node, max_candidates=2):
         """Find the best UCT-scored nodes in the tree as fusion candidates.
 
         Reuses the tree's `_score_candidate` method (UCT + exploration bonuses)
@@ -2330,21 +2341,25 @@ You are a senior Python developer implementing a code improvement plan.
         Returns:
             Tuple of (fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion).
         """
-        candidates = self._find_fusion_candidates(target_node, max_candidates=3)
+        candidates = self._find_fusion_candidates(target_node, max_candidates=2)
 
         # No candidates at all — can't do fusion or fallback
         if not candidates:
             _run_logger.info(f"[Fusion] No candidates found for node {target_node.id[:8]}")
             return None, "", [], [], [], False
 
-        # Build reference trajectories
+        # Build reference trajectories (as diffs vs target)
         reference_sections = []
         for i, ref_node in enumerate(candidates):
             ref_score = ref_node.metric.value if ref_node.metric else "N/A"
             ref_q = ref_node.total_reward / max(ref_node.visits, 1)
+            diff_str = self._compute_code_diff(
+                target_node.code, ref_node.code,
+                fromfile="target", tofile=f"ref_{i + 1}",
+            )
             reference_sections.append(
                 f"## Reference Solution {i + 1} (Score: {ref_score}, Q: {ref_q:.4f})\n"
-                f"```\n{ref_node.code}\n```\n"
+                f"Diff vs target:\n```\n{diff_str}\n```\n"
             )
 
         # Build codebase context
@@ -2366,7 +2381,7 @@ You are a senior Python developer implementing a code improvement plan.
 ### Cross-Branch Fusion Context
 
 You are a code planning architect for cross-branch fusion. Analyze the
-reference solutions below and plan how to selectively incorporate useful
+reference diffs below and plan how to selectively incorporate useful
 techniques into the current codebase.
 
 IMPORTANT RULES:
@@ -2375,8 +2390,9 @@ IMPORTANT RULES:
 
 ## Required Analysis
 
-**Reference Analysis** — For each reference solution:
-- Why did it succeed? What specific technique or design choice drove its performance?
+**Reference Analysis** — For each reference diff:
+- What does this reference do differently from the target?
+- Why did that difference lead to better performance?
 - What is the core mechanism, not just what it does?
 
 **Compatibility Check** — For each candidate technique:
@@ -2395,7 +2411,7 @@ One well-integrated technique is better than a messy combination of several.
 ## Current Codebase
 {codebase_prompt}
 
-## Reference Solutions
+## Reference Diffs
 {''.join(reference_sections)}
 
 Produce a concise fusion plan following this structure.
@@ -2434,13 +2450,13 @@ You are implementing a cross-branch fusion plan.
 ## Current Codebase
 {codebase_prompt}
 
-## Reference Solutions (for context while reading)
+## Reference Diffs (for context while reading)
 {''.join(reference_sections)}
 
 ## Instructions
 1. Read the current files to understand the codebase.
-2. Implement the fusion plan: selectively adopt techniques from the
-   reference solutions that fit your current architecture.
+2. Implement the fusion plan: selectively adopt techniques shown in the
+   reference diffs that fit your current architecture.
 3. Preserve what is working in your current solution.
 4. Do NOT blindly combine everything — choose the most relevant technique(s).
 5. Output complete runnable Python files, not just diffs.
@@ -2451,7 +2467,7 @@ a messy combination of several.
 
 ## Integration Checklist
 - Verify the adopted technique is compatible with existing variable names and function signatures
-- Ensure the technique addresses a real limitation, not just copied for variety
+- Ensure the technique addresses a real limitation, not just copied from the diff for variety
 - Preserve the current solution's strengths that are not mentioned in the fusion plan
 """
             try:
