@@ -1,11 +1,11 @@
 const stageColors = {
-  root: '#f9a8d4',
-  improve: '#c4a8e0',
-  debug: '#ffb7b2',
-  draft: '#87ceeb',
+  root: '#f7c2e0',
+  improve: '#d4b0e8',
+  debug: '#f7d0c7',
+  draft: '#c2d8f2',
 };
 
-const defaultColor = '#c4a8e0';
+const defaultColor = '#d4b0e8';
 
 const stageEmojis = {
   root: '\uD83C\uDF38',
@@ -276,7 +276,7 @@ function renderTree() {
   if (allScores.length > 0) {
     const rangeItem = document.createElement('div');
     rangeItem.className = 'legend-item';
-    rangeItem.style.cssText = 'color:#b899cc;font-size:10px;font-family:monospace;';
+    rangeItem.style.cssText = 'color:#e8d4f4;font-size:10px;font-family:monospace;';
     rangeItem.textContent = `score ${Math.min(...allScores).toFixed(3)}–${Math.max(...allScores).toFixed(3)}`;
     legend.appendChild(rangeItem);
   }

@@ -14,26 +14,26 @@
   --border-light: #5a3d7a;
   --text-primary: #fbeff8;
   --text-secondary: #e4cdef;
-  --text-muted: #b398c9;
-  --accent-pink: #f5bddc;
-  --accent-pink-dim: rgba(245, 189, 220, 0.12);
+  --text-muted: #d4b8e8;
+  --accent-pink: #f7c2e0;
+  --accent-pink-dim: rgba(247, 194, 224, 0.14);
   --accent-lavender: #d9c3ee;
   --accent-lavender-dim: rgba(217, 195, 238, 0.1);
   --accent-mint: #b5e9cd;
   --accent-mint-dim: rgba(181, 233, 205, 0.1);
-  --accent-peach: #f5cfc7;
-  --accent-peach-dim: rgba(245, 207, 199, 0.1);
-  --accent-sky: #bfdff0;
-  --accent-sky-dim: rgba(191, 223, 240, 0.1);
-  --accent-yellow: #f5e0a8;
-  --accent-yellow-dim: rgba(245, 224, 168, 0.1);
+  --accent-peach: #f7d0c7;
+  --accent-peach-dim: rgba(247, 208, 199, 0.1);
+  --accent-sky: #c2d8f2;
+  --accent-sky-dim: rgba(194, 216, 242, 0.1);
+  --accent-yellow: #f7e5b0;
+  --accent-yellow-dim: rgba(247, 229, 176, 0.1);
   --best-score: #b5e9cd;
-  --root-color: #f5bddc;
-  --improve-color: #c4a8e0;
-  --debug-color: #f5cfc7;
-  --draft-color: #bfdff0;
-  --other-color: #c4a8e0;
-  --glow-pink: 0 0 18px rgba(245, 189, 220, 0.18);
+  --root-color: #f7c2e0;
+  --improve-color: #d4b0e8;
+  --debug-color: #f7d0c7;
+  --draft-color: #c2d8f2;
+  --other-color: #d4b0e8;
+  --glow-pink: 0 0 18px rgba(247, 194, 224, 0.18);
   --glow-mint: 0 0 18px rgba(181, 233, 205, 0.18);
   --glow-lavender: 0 0 18px rgba(217, 195, 238, 0.18);
   --shadow-sm: 0 2px 8px rgba(40, 20, 60, 0.28);
@@ -303,7 +303,7 @@ header .subtitle {
   display: block;
   font-size: 24px;
   font-weight: 700;
-  color: #ffc0e8;
+  color: var(--accent-pink);
   letter-spacing: -0.5px;
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -799,7 +799,7 @@ section h2::after {
 .iteration-num {
   font-weight: 700;
   font-size: 13px;
-  color: #ffc0e8;
+  color: var(--accent-pink);
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 

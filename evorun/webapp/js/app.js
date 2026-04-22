@@ -139,7 +139,7 @@ function renderIterations() {
       diffContainer.style.cssText = 'display:none; margin-top:8px;';
 
       const diffHeader = document.createElement('div');
-      diffHeader.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0;font-size:12px;color:#ffc0e8;';
+      diffHeader.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0;font-size:12px;color:var(--accent-pink);';
 
       const diffToggle = document.createElement('span');
       diffToggle.textContent = '›';

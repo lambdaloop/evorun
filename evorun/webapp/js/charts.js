@@ -112,7 +112,7 @@ function renderScoreChart() {
           grid: { color: 'rgba(61, 42, 92, 0.4)', drawBorder: false },
           border: { display: false },
           ticks: {
-            color: '#d4b8e8',
+            color: '#ddbdf0',
             font: { size: 10 },
             maxRotation: 45,
             autoSkip: true,
@@ -127,7 +127,7 @@ function renderScoreChart() {
           grid: { color: 'rgba(61, 42, 92, 0.4)', drawBorder: false },
           border: { display: false },
           ticks: {
-            color: '#d4b8e8',
+            color: '#ddbdf0',
             font: { size: 11 },
             padding: 8,
           },
