@@ -481,76 +481,6 @@ class CodebaseManager:
 # ────────────────────────────────────────────────────────────
 
 
-def _run_claude_cli(prompt: str, cwd: str, model: str = "claude-sonnet-4-6",
-                    max_turns: int = 500, allowed_tools: list[str] | None = None,
-                    log_file: str | None = None, retries: int = 3,
-                    retry_base_delay: float = 5.0) -> str:
-    """Run the claude CLI and return its output.
-
-    Args:
-        prompt: User prompt text.
-        cwd: Working directory for the claude CLI.
-        model: Claude model name.
-        max_turns: Maximum tool-use turns.
-        allowed_tools: List of allowed tool names.
-        log_file: Optional file path to append output to.
-        retries: Number of retry attempts on failure.
-        retry_base_delay: Base delay in seconds for exponential backoff.
-
-    Returns:
-        LLM response text.
-    """
-    import time
-
-    def _do_call():
-        cmd = [
-            'claude',
-            '-p', prompt,
-            '--output-format', 'text',
-            '--max-turns', str(max_turns),
-            '--model', model,
-        ]
-        if allowed_tools:
-            cmd.extend(['--allowedTools'] + allowed_tools)
-
-        log_fh = open(log_file, "w", encoding="utf-8") if log_file else None
-        process = subprocess.Popen(
-            cmd,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        output_lines = []
-        try:
-            for line in process.stdout:
-                print(line, end='', flush=True)
-                output_lines.append(line)
-                if log_fh:
-                    log_fh.write(line)
-        finally:
-            if log_fh:
-                log_fh.close()
-        process.wait()
-        result = "".join(output_lines)
-        if not result:
-            raise RuntimeError("claude CLI returned empty output")
-        return result
-
-    for attempt in range(1, retries + 1):
-        try:
-            return _do_call()
-        except Exception as e:
-            _run_logger.warning(
-                f"Claude CLI failed (attempt {attempt}/{retries}): {e}"
-            )
-            if attempt < retries:
-                time.sleep(retry_base_delay * (2 ** (attempt - 1)))
-    raise RuntimeError(f"Claude CLI failed after {retries} retries")
-
-
 _UNSET = object()  # sentinel for "explicitly unset this env var"
 
 
@@ -732,17 +662,11 @@ class EvoRunAgent:
         self.planner_api_key = planner_cfg.get("api_key", None)
         self.editor_api_key = editor_cfg.get("api_key", None)
 
-        self.editor_model_name = self.editor_model
-
         # Tree search max children
         self.tree_max_children = getattr(args, 'max_children', 10)
         self.optim_mode = getattr(args, 'optim_mode', 'max')
         self.tree = TreeSearch(maximize=(self.optim_mode == "max"), max_children=self.tree_max_children)
         self.tree.explore_c = self._get_decay_exploration_c()
-
-        # Track current tree node snapshot for LLM feedback
-        self._current_restored_node_id: str | None = None
-        self.tree_expansion_count = 0
 
         # Background thread pool for LLM summary generation
         self._summary_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -772,7 +696,6 @@ class EvoRunAgent:
         self.state_path = self.codebase.codebase_dir / ".evorun_state.json"
         self._resumed = False
         self._history_start: int = 0
-        self._initial_hashes: dict[str, str] = {}
 
         # Last iteration file changes (for feedback context).
         self._last_modified_files: list[str] = []
@@ -849,12 +772,6 @@ class EvoRunAgent:
         self._branch_stagnation = {
             int(k) if str(k).isdigit() else k: v for k, v in branch_stag_data.items()
         }
-        # Seed history for LLM (compact)
-        for entry in self.history:
-            llm = entry.llm_response.strip()
-            if len(llm) > 300:
-                llm = llm[:MAX_LLM_RESPONSE_SUMMARY] + "..."
-            summary = entry.edit_summary if entry.edit_summary else "[N/A]"
 
         # Restore tree search state.
         ts_data = data.get("tree_structure")
@@ -869,14 +786,6 @@ class EvoRunAgent:
 
         self._resumed = True
         return True
-
-    def _build_claude(self) -> None:
-        """Initialize the Claude CLI editor.
-
-        The claude CLI reads ANTHROPIC_API_KEY from the environment.
-        """
-        self.editor_model_name = self.editor_model
-        _run_logger.info(f"Using Claude CLI with model: {self.editor_model_name}")
 
 # ─── Solution deduplication ─────────────────────────────────────
 
@@ -925,18 +834,6 @@ class EvoRunAgent:
         return self._is_duplicate_code(code), code
 
     # ─── Early exit conditions ─────────────────────────────────────
-
-    def _check_topk_stagnation(self, topk: int = 5) -> bool:
-        """Check if top-k candidates show stagnation (no improvement).
-
-        Args:
-            topk: Number of top candidates to check.
-
-        Returns:
-            True if top-k candidates are stagnant.
-        """
-        # Disabled
-        return False
 
     # ─── Progressive UCT decay ─────────────────────────────────────
 
@@ -1166,20 +1063,12 @@ You are a senior Python developer implementing a code improvement plan.
         import evorun.utils.response as utils
         # Seed and initialize.
         self._attempt_resume()
-        if not self.fake_run:
-            self._build_claude()
 
         # Setup codebase / snapshots / state.
         if not self._resumed:
             self.codebase.setup(resuming=False)
-            self._initial_hashes = self._compute_file_hashes(
-                self.codebase.get_experiment_files(),
-            )
         else:
             self.codebase.setup(resuming=True)
-            self._initial_hashes = self._compute_file_hashes(
-                self.codebase.get_experiment_files(),
-            )
 
         if not self.fake_run:
             _run_logger.info("=" * 72)
@@ -1198,8 +1087,6 @@ You are a senior Python developer implementing a code improvement plan.
             if self._iteration > 0:
                 _run_logger.info(f"[Iter {self._iteration}] "
                             f"--- Next iteration ---")
-
-            self.tree_expansion_count += 1
 
             try:
                 self._run_iteration()
@@ -1287,12 +1174,6 @@ You are a senior Python developer implementing a code improvement plan.
             target_node_dir = self._find_node_snapshot(target_node)
         if target_node_dir is not None:
             self._restore_snapshot(target_node_dir)
-            self._current_restored_node_id = target_node.id
-        else:
-            self._current_restored_node_id = None
-
-        if target_node is self.tree.root:
-            self._current_restored_node_id = None
 
         # Ensure target_node has a snapshot for later diff computation.
         # Child expansions will diff against this snapshot, so it must
@@ -1692,20 +1573,6 @@ You are a senior Python developer implementing a code improvement plan.
         if used_fusion:
             child_node.stage = "fusion"
 
-        # Populate code_summary on the child.
-        # Use the edit summary if available, otherwise the file change list.
-        if edit_summary:
-            child_node.code_summary = edit_summary
-        else:
-            parts = []
-            if modified_files:
-                parts.append(f"modified: {', '.join(modified_files)}")
-            if added_files:
-                parts.append(f"added: {', '.join(added_files)}")
-            if deleted_files:
-                parts.append(f"deleted: {', '.join(deleted_files)}")
-            child_node.code_summary = " ".join(parts) if parts else None
-
         _run_logger.info(f"[Iter {self._iteration}] Child created: "
                     f"node {child_node.id[:8]} with score={child_score}")
 
@@ -1799,14 +1666,6 @@ You are a senior Python developer implementing a code improvement plan.
             _run_logger.info(
                 f"[Stop] All {stagnant_count} parent(s) stagnant "
                 f">(={self.patience} consecutive non-improvement)."
-            )
-            self._stop = True
-            return
-
-        # Check top-k stagnation
-        if self._check_topk_stagnation(topk=5):
-            _run_logger.info(
-                f"[Stop] Top-5 candidates stagnant — no improvement in recent iterations."
             )
             self._stop = True
             return
@@ -2186,34 +2045,6 @@ You are a senior Python developer implementing a code improvement plan.
                 return "[summariser failed]"
 
         self._summary_future = self._summary_executor.submit(_do_summary)
-
-    def _get_edit_summary(self, iteration: int) -> str:
-        """Wait for and return the edit summary from the background thread.
-
-        Args:
-            iteration: Current iteration number (for logging).
-
-        Returns:
-            The edit summary string, or empty string if no summary was pending.
-        """
-        if self._summary_future is None:
-            return ""
-
-        try:
-            summary = self._summary_future.result(timeout=600.0)
-            return summary or ""
-        except concurrent.futures.TimeoutError:
-            _run_logger.warning(
-                f"Summariser timed out (iter {iteration})"
-            )
-            return "[summariser timed out]"
-        except Exception as e:
-            _run_logger.warning(
-                f"Summariser error (iter {iteration}): {e}"
-            )
-            return "[summariser error]"
-        finally:
-            self._summary_future = None
 
     def _restore_snapshot(self, snapshot_name: str) -> None:
         """Restore the codebase from a named snapshot.
