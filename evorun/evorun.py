@@ -269,8 +269,8 @@ class Evaluator:
     def _parse_output(stdout: str) -> tuple[float | None, str]:
         """Extract score and description from stdout.
 
-        Always reads the last non-empty line of output and tries to parse it
-        as JSON first. Falls back to regex on that same line.
+        Scans from the bottom of the output upward, trying each non-empty line
+        as JSON first, then regex. Handles negative scores and scientific notation.
 
         Args:
             stdout: Raw stdout string from the eval command.
@@ -282,27 +282,29 @@ class Evaluator:
         if not lines:
             return None, ""
 
-        last_line = lines[-1].strip()
-        if not last_line:
-            return None, ""
+        # Regex supports negatives and scientific notation.
+        pattern = re.compile(
+            r"(?:^|(?<=\s))score[:=]\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)"
+        )
 
-        # Try JSON on the last line.
-        try:
-            data = json.loads(last_line)
-            if isinstance(data, dict) and "score" in data:
-                score = float(data["score"])
-                if math.isnan(score):
-                    return None, data.get("description", "")
-                return score, data.get("description", "")
-        except (json.JSONDecodeError, ValueError, TypeError):
-            pass
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            # Try JSON first.
+            try:
+                data = json.loads(line)
+                if isinstance(data, dict) and "score" in data:
+                    score = float(data["score"])
+                    if not math.isnan(score):
+                        return score, data.get("description", "")
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+            # Regex fallback.
+            m = pattern.search(line)
+            if m:
+                return float(m.group(1)), ""
 
-        # Regex fallback — require word boundary so "score" isn't part of a
-        # larger token (e.g., "no_score" or "autoscore").
-        pattern = re.compile(r"(?:^|(?<=\s))score[:=]\s*(\d+(?:\.\d+)?)")
-        m = pattern.search(last_line)
-        if m:
-            return float(m.group(1)), ""
         return None, ""
 
 
@@ -1402,6 +1404,12 @@ Do not try to improve the score — just fix the errors.
         debug / review / code generation, child creation, stagnation
         tracking, and state persistence.
         """
+        # Clear per-iteration file change state so feedback never shows stale
+        # changes from a different branch's previous expansion.
+        self._last_modified_files = []
+        self._last_added_files = []
+        self._last_deleted_files = []
+
         # ---- Step 0: Select node to expand (UCT across entire tree) ----
         target_branch_id = len(self.tree.root.children) + 1
         target_node = self.tree.select_node(branch_id=target_branch_id)
@@ -1859,23 +1867,9 @@ Do not try to improve the score — just fix the errors.
                     shutil.rmtree(pre_snap_dir)
                 except OSError:
                     pass
-            # Update stagnation — duplicate is a non-improving expansion.
-            self._parent_stagnation[parent_id] = (
-                self._parent_stagnation.get(parent_id, 0) + 1
-            )
-            # Check if ALL parents are stagnant.
-            stagnant_count = sum(
-                1 for v in self._parent_stagnation.values()
-                if v >= self.patience
-            )
-            total_parents = len(self._parent_stagnation)
-            if total_parents > 0 and stagnant_count >= total_parents:
-                _run_logger.info(
-                    f"[Stop] All {stagnant_count} parent(s) stagnant "
-                    f">(={self.patience} consecutive non-improvement)."
-                )
-                self._stop = True
-                return
+            # Do NOT increment parent stagnation for duplicate code — the LLM
+            # repeated a previously-seen solution, which is an LLM failure not
+            # a parent failure.  The consecutive_no_changes counter covers this.
             # Record as a skipped iteration
             self.history.append(HistoryEntry(
                 iter=self._iteration, score=None,

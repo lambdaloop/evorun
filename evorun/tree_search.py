@@ -218,6 +218,7 @@ class TreeSearch:
         uct: float = mean_reward + exploration
 
         # Sparsity bonus for under-explored branches (root children only).
+        # Log-scaled so a large imbalance doesn't overwhelm the UCT signal.
         if node.parent and node.parent.parent is None:
             node_id: str = node.id
             branch_expansions: int = self._branch_expansions.get(node_id, 0)
@@ -226,7 +227,7 @@ class TreeSearch:
                 avg_per_branch: float = total / max(len(self.root.children), 1)
                 diff: float = avg_per_branch - branch_expansions
                 if diff > 0:
-                    uct += self.sparsity_bonus * diff
+                    uct += self.sparsity_bonus * math.log1p(diff)
 
         return uct
 
