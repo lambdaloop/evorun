@@ -637,6 +637,16 @@ class EvoRunAgent:
         history: List of HistoryEntry records (one per iteration).
     """
 
+    _evorun_permissions: dict[str, list[str]] = {
+        "allow": [
+            "Edit(./experiment/**)",
+        ],
+        "deny": [
+            "Read(./.evorun*)",
+            "Edit(./.evorun*)",
+        ],
+    }
+
     def __init__(self, args: argparse.Namespace) -> None:
         """Initialize EvoRunAgent with parsed arguments.
 
@@ -731,23 +741,36 @@ class EvoRunAgent:
         signal.signal(signal.SIGTERM, _signal_handler)
 
     def _ensure_claude_settings(self) -> None:
-        """Create .claude/settings.local.json to deny reads of .evorun* files.
+        """Ensure .claude/settings.local.json enforces evorun sandbox rules.
 
-        This prevents the LLM from accidentally reading evorun's internal
-        state files (snapshots, planner output, state JSON) when using
-        the Read tool during planning or editing.
+        Merges evorun-specific permissions into any existing settings.local.json,
+        preserving other settings (e.g. defaultMode, user-defined allow/deny rules).
+        Idempotent — re-running produces identical output with no duplicates.
+
+        Rules:
+        - Allow Edit of experiment/ (auto-approve, sandbox LLM to one folder)
+        - Deny Read/Edit of .evorun* files (protect internal state, snapshots, logs)
+        - All other reads are unrestricted (normal Claude Code behavior)
         """
         settings_path = self.codebase.codebase_dir / ".claude" / "settings.local.json"
-        if settings_path.exists():
-            return
         try:
             settings_path.parent.mkdir(exist_ok=True)
+            data = {}
+            if settings_path.exists():
+                try:
+                    data = json.loads(settings_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    _run_logger.warning(
+                        f"Failed to parse {settings_path}, overwriting"
+                    )
+                    data = {}
+            permissions = data.setdefault("permissions", {})
+            for key in ("allow", "deny"):
+                existing = set(permissions.get(key, []))
+                existing.update(self._evorun_permissions.get(key, []))
+                permissions[key] = sorted(existing)
             settings_path.write_text(
-                json.dumps({
-                    "permissions": {
-                        "deny": ["Read(./.evorun*)", "Edit(./.evorun*)"]
-                    }
-                }, indent=2),
+                json.dumps(data, indent=2),
                 encoding="utf-8",
             )
         except Exception as e:
