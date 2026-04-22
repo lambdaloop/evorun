@@ -27,7 +27,7 @@ pyyaml = "*"
 tomli = "*"
 
 [tool.hatch.build]
-include = ["evorun/webapp/**/*"]
+include = ["evorun"]
 
 [tool.pixi.pypi-dependencies]
 evorun = { path = ".", editable = true }

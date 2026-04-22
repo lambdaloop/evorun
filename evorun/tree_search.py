@@ -136,7 +136,7 @@ class TreeSearch:
 
         Selection algorithm:
             1.  Collect all expandable nodes across the full tree (not just root children)
-            2.  Score each candidate with UCT = Q + c * sqrt(ln(parent_visits) / visits)
+            2.  Score each candidate with UCT = Q + c * sqrt(ln(parent_children + 1) / num_children)
             3.  Add sparsity bonus for nodes in branches with fewer total expansions
             4.  Pick the highest-scoring node
 
