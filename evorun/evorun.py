@@ -441,36 +441,6 @@ class CodebaseManager:
                 _run_logger.error(f"Failed to write {path}: {e}")
         return written
 
-    def get_codebase_prompt(self, max_size: int = 4000) -> str:
-        """Build a string with all Python files in experiment/.
-
-        Used for prompt building so the LLM can see the full context.
-
-        Args:
-            max_size: Maximum characters to include (truncated).
-
-        Returns:
-            File contents formatted as "# File: <path>\n<content>".
-        """
-        result: list[str] = []
-        total = 0
-        exp_src = self.codebase_dir / "experiment"
-        if not exp_src.is_dir():
-            return ""
-        for rel_path in sorted(p.relative_to(self.codebase_dir)
-                                for p in exp_src.rglob("*.py")):
-            try:
-                abs_path = exp_src / rel_path
-                content = abs_path.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            result.append(f"# File: {rel_path}\n{content}")
-            total += len(content) + 30  # approximate
-            if total > max_size:
-                _run_logger.debug(f"Truncated codebase prompt at {max_size} chars")
-                break
-        return "\n".join(result)
-
     def restore_all(self) -> None:
         """Restore all files from the backup directory."""
         if not self.backup_dir.exists():
@@ -837,7 +807,6 @@ class EvoRunAgent:
                 editor_output=e.get("editor_output", ""),
                 is_duplicate=e.get("is_duplicate", False),
             )
-            h.claude_feedback = e.get("claude_feedback", "")
             all_history.append(h)
         # Only keep history from the current session (iterations < next_iteration)
         # to prevent stale entries from triggering early stagnation detection.
@@ -1121,9 +1090,6 @@ Produce a concise plan following this structure.
         editor_prompt = f"""\
 You are a senior Python developer implementing a code improvement plan.
 
-## Current Codebase
-{self.codebase.get_codebase_prompt(max_size=20000)}
-
 ## Context (from evaluation)
 {feedback}
 
@@ -1281,9 +1247,6 @@ Produce a concise fix plan following this structure.
 
         editor_prompt = f"""\
 You are a senior Python developer fixing errors in the codebase.
-
-## Current Codebase
-{self.codebase.get_codebase_prompt(max_size=20000)}
 
 ## Error
 {error_text}
@@ -1956,7 +1919,6 @@ Do not try to improve the score — just fix the errors.
             editor_input=(editor_input or "").strip(),
             editor_output=(log_content or "").strip(),
         ))
-        self.history[-1].claude_feedback = feedback or ""
 
         # Update global best if child score improves (respects optim-mode).
         if child_score is not None:
@@ -2113,7 +2075,6 @@ Do not try to improve the score — just fix the errors.
                 "planner_output": e.planner_output,
                 "editor_input": e.editor_input,
                 "editor_output": e.editor_output,
-                "claude_feedback": getattr(e, "claude_feedback", ""),
             })
         # Derive next_iteration from tree structure to stay in sync with history
         max_step = max((n.step for n in self.tree.journal.nodes), default=0)
@@ -2656,9 +2617,6 @@ Do not try to improve the score — just fix the errors.
                 f"Diff vs target:\n```\n{diff_str}\n```\n"
             )
 
-        # Build codebase context
-        codebase_prompt = self.codebase.get_codebase_prompt(max_size=20000)
-
         # Build target node context (score + eval output)
         target_score = target_node.metric.value if target_node.metric else None
         target_eval = target_node.eval_output or ""
@@ -2717,9 +2675,6 @@ One well-integrated technique is better than a messy combination of several.
 **Eval Output**:
 {target_eval if target_eval else '(none)'}
 
-## Current Codebase
-{codebase_prompt}
-
 ## Reference Diffs
 {''.join(reference_sections)}
 
@@ -2756,9 +2711,6 @@ You are implementing a cross-branch fusion plan.
 
 ## Fusion Plan
 {fusion_plan}
-
-## Current Codebase
-{codebase_prompt}
 
 ## Reference Diffs (for context while reading)
 {''.join(reference_sections)}
