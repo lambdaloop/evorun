@@ -2,6 +2,16 @@
 
 This is me messing around with automatic optimization with LLMs, based on [MLEvolve](https://github.com/InternScience/MLEvolve) but with claude and standard project structure.
 
+## Project structure
+
+```
+my_project/
+├── experiment/   # code the LLM edits
+├── eval.py       # prints {"score": <float>} to stdout
+├── TASK.md       # describes the task and objective
+└── config.toml   # optional, see config.example.toml
+```
+
 ## Commands
 
 - `evorun run` — run the optimization loop on a project directory
