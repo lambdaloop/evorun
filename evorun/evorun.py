@@ -671,7 +671,7 @@ class EvoRunAgent:
             args: Parsed CLI arguments from parse_args().
         """
         self.codebase = CodebaseManager(
-            args.codebase_dir,
+            args.path,
             task_file="TASK.md",
         )
         eval_cmd = getattr(args, 'eval_cmd', None) or "pixi run python eval.py"
@@ -681,6 +681,7 @@ class EvoRunAgent:
         )
 
         self.fake_run = getattr(args, 'fake_run', False)
+        self.print_claude_output = getattr(args, 'print_claude_output', False)
 
         # LLM config from ~/.config/evorun/evorun.toml.
         # Falls back to hardcoded defaults if the config file is missing a value.
@@ -745,6 +746,9 @@ class EvoRunAgent:
         # Solution deduplication
         self._seen_code_hashes: set[str] = set()
 
+        # Ensure .claude/settings.local.json blocks reads of .evorun* files
+        self._ensure_claude_settings()
+
         # Start the wall-clock timer.
         self._start_time = time.time()
 
@@ -754,6 +758,29 @@ class EvoRunAgent:
             sys.exit(1)
         signal.signal(signal.SIGINT, _signal_handler)
         signal.signal(signal.SIGTERM, _signal_handler)
+
+    def _ensure_claude_settings(self) -> None:
+        """Create .claude/settings.local.json to deny reads of .evorun* files.
+
+        This prevents the LLM from accidentally reading evorun's internal
+        state files (snapshots, planner output, state JSON) when using
+        the Read tool during planning or editing.
+        """
+        settings_path = self.codebase.codebase_dir / ".claude" / "settings.local.json"
+        if settings_path.exists():
+            return
+        try:
+            settings_path.parent.mkdir(exist_ok=True)
+            settings_path.write_text(
+                json.dumps({
+                    "permissions": {
+                        "deny": ["Read(./.evorun*)", "Edit(./.evorun*)"]
+                    }
+                }, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            _run_logger.warning(f"Failed to create .claude/settings.local.json: {e}")
 
     def _check_rate_limit(self, output: str) -> bool:
         """Check if Claude CLI output indicates a rate limit / quota exhaustion.
@@ -1063,7 +1090,7 @@ Produce a concise plan following this structure.
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
-                print_output=False,
+                print_output=self.print_claude_output,
             )
             if self._check_rate_limit(result):
                 return (planner_prompt, "")
@@ -1092,11 +1119,11 @@ You are a senior Python developer implementing a code improvement plan.
 ## Current Codebase
 {self.codebase.get_codebase_prompt(max_size=4000)}
 
-## Your Plan
-{plan}
-
 ## Context (from evaluation)
 {feedback}
+
+## Your Plan
+{plan}
 
 ## Instructions
 1. Read the files mentioned in the plan to understand the current code.
@@ -1121,7 +1148,7 @@ You are a senior Python developer implementing a code improvement plan.
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
-                print_output=False,
+                print_output=self.print_claude_output,
             )
             if self._check_rate_limit(result):
                 return (editor_prompt, "")
@@ -1151,13 +1178,19 @@ You are a senior Python developer implementing a code improvement plan.
         elif result.exit_code is not None and result.exit_code != 0:
             error_context.append(f"**Issue**: Evaluation exited with code {result.exit_code}")
             error_context.append("**Action**: Check the error output and fix the issue")
+        else:
+            error_context.append("**Issue**: Evaluation completed but score could not be parsed")
+            error_context.append("**Action**: Check the eval output below and fix whatever is preventing the evaluation from completing successfully.")
 
         if result.output:
-            error_context.append("\n### Error Output\n")
+            full_output = "\n".join(str(line) for line in result.output)
+            last_3000 = full_output[-3000:] if len(full_output) > 3000 else full_output
+            error_context.append("\n### Eval Output\n")
             error_context.append("```")
-            for line in result.output[:30]:
-                error_context.append(str(line)[:200])
+            error_context.append(last_3000)
             error_context.append("```")
+        else:
+            error_context.append("\n### Eval Output\n(none — the eval command produced no stdout/stderr)")
 
         error_text = "\n".join(error_context)
 
@@ -1194,7 +1227,7 @@ Produce a concise fix plan following this structure.
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
-                print_output=False,
+                print_output=self.print_claude_output,
             )
             if self._check_rate_limit(result):
                 return (planner_prompt, "")
@@ -1225,13 +1258,19 @@ Produce a concise fix plan following this structure.
         elif result.exit_code is not None and result.exit_code != 0:
             error_context.append(f"**Issue**: Evaluation exited with code {result.exit_code}")
             error_context.append("**Action**: Check the error output and fix the issue")
+        else:
+            error_context.append("**Issue**: Evaluation completed but score could not be parsed")
+            error_context.append("**Action**: Check the eval output below and fix whatever is preventing the evaluation from completing successfully.")
 
         if result.output:
-            error_context.append("\n### Error Output\n")
+            full_output = "\n".join(str(line) for line in result.output)
+            last_3000 = full_output[-3000:] if len(full_output) > 3000 else full_output
+            error_context.append("\n### Eval Output\n")
             error_context.append("```")
-            for line in result.output[:30]:
-                error_context.append(str(line)[:200])
+            error_context.append(last_3000)
             error_context.append("```")
+        else:
+            error_context.append("\n### Eval Output\n(none — the eval command produced no stdout/stderr)")
 
         error_text = "\n".join(error_context)
 
@@ -1270,7 +1309,7 @@ Do not try to improve the score — just fix the errors.
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
-                print_output=False,
+                print_output=self.print_claude_output,
             )
             if self._check_rate_limit(result):
                 return (editor_prompt, "")
@@ -1310,6 +1349,8 @@ Do not try to improve the score — just fix the errors.
         if not self.fake_run:
             _run_logger.info("=" * 72)
             _run_logger.info("[EvoRunAgent] Starting optimization loop.")
+            _run_logger.info(f"[Config] Planner: {self.planner_provider}/{self.planner_model}, "
+                         f"Editor: {self.editor_provider}/{self.editor_model}")
             _run_logger.info("=" * 72)
 
         self._iteration = self._history_start
@@ -1715,6 +1756,10 @@ Do not try to improve the score — just fix the errors.
                     parent_snap, modified_files, added_files, deleted_files,
                 )
 
+        # Print diff when debugging is enabled.
+        if diff_text and self.print_claude_output:
+            print(f"[Iter {self._iteration}] Diff:\n{diff_text}", flush=True)
+
         # Submit edit summary to background thread — runs in parallel
         # with the child eval below.
         edit_summary = ""
@@ -1735,7 +1780,7 @@ Do not try to improve the score — just fix the errors.
         parent_score = (
             target_node.metric.value
             if target_node.metric and target_node.metric.value is not None
-            else 0.0
+            else None
         )
         no_changes = (
             not modified_files and not added_files and not deleted_files
@@ -1744,13 +1789,18 @@ Do not try to improve the score — just fix the errors.
             # Generate fake child score based on parent's score.
             # Uniform random variation — unbiased for tree-search
             # prototyping (avoid depth bias, Issue 13).
-            delta = random.uniform(-FAKE_SCORE_DELTA_RANGE, FAKE_SCORE_DELTA_RANGE)
-            child_score = parent_score + delta
-            _run_logger.info(f"[Iter {self._iteration}] Fake child score: "
-                         f"{child_score:.4f}")
+            if parent_score is None:
+                child_score = None
+                _run_logger.info(f"[Iter {self._iteration}] Fake child score: "
+                             f"None (parent score is None)")
+            else:
+                delta = random.uniform(-FAKE_SCORE_DELTA_RANGE, FAKE_SCORE_DELTA_RANGE)
+                child_score = parent_score + delta
+                _run_logger.info(f"[Iter {self._iteration}] Fake child score: "
+                             f"{child_score:.4f}")
         elif no_changes:
             _run_logger.info(f"[Iter {self._iteration}] No code changes — "
-                         f"reusing parent score {parent_score:.4f}")
+                         f"reusing parent score {parent_score}")
             child_score = parent_score
         else:
             _run_logger.info(f"[Iter {self._iteration}] Evaluating "
@@ -2570,6 +2620,11 @@ Do not try to improve the score — just fix the errors.
         # Build codebase context
         codebase_prompt = self.codebase.get_codebase_prompt(max_size=4000)
 
+        # Build target node context (score + eval output)
+        target_score = target_node.metric.value if target_node.metric else None
+        target_eval = target_node.eval_output or ""
+        target_stage = target_node.stage or "unknown"
+
         _run_logger.info(f"[Fusion] Running fusion for node {target_node.id[:8]} "
                         f"with {len(candidates)} reference(s)")
 
@@ -2613,6 +2668,15 @@ IMPORTANT RULES:
 Key principle: Fusion means understanding WHY techniques work, not blindly copying.
 One well-integrated technique is better than a messy combination of several.
 
+## Current Node Context
+
+**Stage**: {target_stage}
+
+**Score**: {target_score if target_score is not None else 'N/A (broken)'}
+
+**Eval Output**:
+{target_eval if target_eval else '(none)'}
+
 ## Current Codebase
 {codebase_prompt}
 
@@ -2636,7 +2700,7 @@ Produce a concise fusion plan following this structure.
                 retries=2,
                 retry_base_delay=3.0,
                 stage="planner",
-                print_output=False,
+                print_output=self.print_claude_output,
             )
             if not self._check_rate_limit(fusion_plan_raw):
                 fusion_plan = fusion_plan_raw.strip()
@@ -2688,7 +2752,7 @@ a messy combination of several.
                     retries=2,
                     retry_base_delay=3.0,
                     stage="editor",
-                    print_output=False,
+                    print_output=self.print_claude_output,
                 )
                 if self._check_rate_limit(log_content):
                     log_content = ""
@@ -3173,7 +3237,11 @@ a messy combination of several.
             List of directive lines for markdown formatting.
         """
         if result.score is None:
-            return []
+            return [
+                "## Your Task",
+                "**The evaluation did not produce a score.**",
+                "Analyze the eval output and error information below, identify what is broken, and fix the code.",
+            ]
 
         # Try to extract target score from TASK.md
         target_score = None
@@ -3412,6 +3480,7 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "use_fusion": True,
     "fusion_min_iters": 10,
     "fusion_prob": 0.5,
+    "print_claude_output": False,
 }
 
 # Mapping from config.toml keys to argparse destination names.
@@ -3431,6 +3500,7 @@ _CONFIG_TO_ARGPARSE: dict[str, str] = {
     "use_fusion": "use_fusion",
     "fusion_min_iters": "fusion_min_iters",
     "fusion_prob": "fusion_prob",
+    "print_claude_output": "print_claude_output",
 }
 
 
@@ -3488,8 +3558,138 @@ def _apply_task_config(args: argparse.Namespace, task_config: dict[str, Any]) ->
             setattr(args, arg_dest, value)
 
 
+def _add_run_args(subparser: argparse.ArgumentParser) -> None:
+    """Add arguments shared by the 'run' subcommand."""
+    subparser.add_argument(
+        "--path",
+        required=True,
+        help="Path to the codebase directory to optimize",
+    )
+    subparser.add_argument(
+        "--eval-cmd",
+        default=None,
+        help="Evaluation command to run (default: 'pixi run python eval.py')",
+    )
+    subparser.add_argument(
+        "--max-children",
+        type=int, default=10,
+        help="Maximum child expansions per node in the tree (default: 10)"
+    )
+    subparser.add_argument(
+        "--optim-mode",
+        choices=["max", "min"],
+        default="max",
+        help="Optimization direction: 'max' to maximize score, 'min' to minimize (default: max)",
+    )
+    subparser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete any existing state file and start fresh",
+    )
+    subparser.add_argument(
+        "--max-iters", type=int, default=50,
+        help="Maximum number of iterations (default: 50)",
+    )
+    subparser.add_argument(
+        "--time-limit", type=int, default=0,
+        help="Wall-clock time limit in seconds (0 means no limit)",
+    )
+    subparser.add_argument(
+        "--patience", type=int, default=10,
+        help="Stagnation threshold: stop when all branches have been stagnant "
+              "for >=N iterations (default: 10)",
+    )
+    subparser.add_argument(
+        "--eval-timeout", type=int, default=300,
+        help="Timeout per evaluation run in seconds (default: 300)",
+    )
+    subparser.add_argument(
+        "--llm-retries", type=int, default=3,
+        help="Retry LLM query on failure (default: 3)",
+    )
+    subparser.add_argument(
+        "--llm-retry-base-delay", type=float, default=3.0,
+        help="Base delay (s) for exponential backoff (default: 3.0)",
+    )
+    subparser.add_argument(
+        "--fake-run",
+        action="store_true",
+        help=("Run in 'fake' mode: generate random scores, simulate LLM "
+              "changes — for rapid tree-search prototyping without "
+              "real eval or LLM calls"),
+    )
+    subparser.add_argument(
+        "--decay-exploration",
+        action="store_true",
+        default=True,
+        help="Enable progressive UCT exploration decay over time (default: True)",
+    )
+    subparser.add_argument(
+        "--no-decay",
+        action="store_false",
+        dest="decay_exploration",
+        help="Disable progressive UCT exploration decay",
+    )
+    subparser.add_argument(
+        "--no-fusion",
+        action="store_false",
+        dest="use_fusion",
+        help="Disable cross-branch fusion agent (default: enabled)",
+    )
+    subparser.add_argument(
+        "--fusion-min-iters",
+        type=int,
+        default=10,
+        help="Minimum iterations before fusion is allowed (default: 10)",
+    )
+    subparser.add_argument(
+        "--fusion-prob",
+        type=float,
+        default=0.5,
+        help="Probability of using fusion after fusion_min_iters (default: 0.5)",
+    )
+    subparser.add_argument(
+        "--server",
+        action="store_true",
+        help="Start the web visualization server alongside the evorun run",
+    )
+    subparser.add_argument(
+        "--port",
+        type=int, default=9000,
+        help="Port for the web visualization server (default: 9000)",
+    )
+    subparser.add_argument(
+        "--print-claude-output",
+        action="store_true",
+        help="Print Claude CLI output (planner/editor) in real-time for debugging",
+    )
+
+
+def _add_viz_args(subparser: argparse.ArgumentParser) -> None:
+    """Add arguments shared by the 'viz' subcommand."""
+    subparser.add_argument(
+        "--path",
+        required=True,
+        help="Path to the codebase directory to visualize",
+    )
+    subparser.add_argument(
+        "--port",
+        type=int, default=9000,
+        help="Port for the web visualization server (default: 9000)",
+    )
+
+
+def _add_init_args(subparser: argparse.ArgumentParser) -> None:
+    """Add arguments for the 'init' subcommand."""
+    subparser.add_argument(
+        "--path",
+        default=".",
+        help="Path to the directory to initialize (default: current directory)",
+    )
+
+
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments using argparse.
+    """Parse command-line arguments using argparse subcommands.
 
     Returns:
         Parsed arguments namespace.
@@ -3498,126 +3698,46 @@ def parse_args() -> argparse.Namespace:
         description="Iteratively improve a codebase using LLM-driven optimization. "
         "With Monte Carlo Tree Search for branching exploration.",
     )
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Codebase directory (defaults to cwd).
-    parser.add_argument(
-        "codebase_dir", nargs="?", default=".",
-        help="Directory containing the codebase experiment (default: current directory)",
+    # --- run subcommand ---
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run the optimization loop on a codebase",
     )
+    _add_run_args(run_parser)
 
-    # Eval command.
-    parser.add_argument(
-        "--eval-cmd",
-        default=None,
-        help="Evaluation command to run (default: 'pixi run python eval.py')",
+    # --- viz subcommand ---
+    viz_parser = subparsers.add_parser(
+        "viz",
+        help="Start the web visualization server (no optimizer)",
     )
+    _add_viz_args(viz_parser)
 
-    # Optional arguments.
-    parser.add_argument(
-        "--max-children",
-        type=int, default=10,
-        help="Maximum child expansions per node in the tree (default: 10)"
+    # --- init subcommand ---
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Initialize a new evorun project in the specified directory",
     )
-    parser.add_argument(
-        "--optim-mode",
-        choices=["max", "min"],
-        default="max",
-        help="Optimization direction: 'max' to maximize score, 'min' to minimize (default: max)",
-    )
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="Delete any existing state file and start fresh",
-    )
-    parser.add_argument(
-        "--max-iters", type=int, default=50,
-        help="Maximum number of iterations (default: 50)",
-    )
-    parser.add_argument(
-        "--time-limit", type=int, default=0,
-        help="Wall-clock time limit in seconds (0 means no limit)",
-    )
-    parser.add_argument(
-        "--patience", type=int, default=10,
-        help="Stagnation threshold: stop when all branches have been stagnant "
-              "for >=N iterations (default: 10)",
-    )
-    parser.add_argument(
-        "--eval-timeout", type=int, default=300,
-        help="Timeout per evaluation run in seconds (default: 300)",
-    )
-    parser.add_argument(
-        "--llm-retries", type=int, default=3,
-        help="Retry LLM query on failure (default: 3)",
-    )
-    parser.add_argument(
-        "--llm-retry-base-delay", type=float, default=3.0,
-        help="Base delay (s) for exponential backoff (default: 3.0)",
-    )
-    parser.add_argument(
-        "--fake-run",
-        action="store_true",
-        help=("Run in 'fake' mode: generate random scores, simulate LLM "
-              "changes — for rapid tree-search prototyping without "
-              "real eval or LLM calls"),
-    )
-    parser.add_argument(
-        "--decay-exploration",
-        action="store_true",
-        default=True,
-        help="Enable progressive UCT exploration decay over time (default: True)",
-    )
-    parser.add_argument(
-        "--no-decay",
-        action="store_false",
-        dest="decay_exploration",
-        help="Disable progressive UCT exploration decay",
-    )
-    parser.add_argument(
-        "--no-fusion",
-        action="store_false",
-        dest="use_fusion",
-        help="Disable cross-branch fusion agent (default: enabled)",
-    )
-    parser.add_argument(
-        "--fusion-min-iters",
-        type=int,
-        default=10,
-        help="Minimum iterations before fusion is allowed (default: 10)",
-    )
-    parser.add_argument(
-        "--fusion-prob",
-        type=float,
-        default=0.5,
-        help="Probability of using fusion after fusion_min_iters (default: 0.5)",
-    )
-    parser.add_argument(
-        "--server",
-        action="store_true",
-        help="Start the web visualization server alongside the evorun run",
-    )
-    parser.add_argument(
-        "--server-only",
-        action="store_true",
-        help="Start the web visualization server without running the optimizer (blocks until interrupted)",
-    )
-    parser.add_argument(
-        "--port",
-        type=int, default=9000,
-        help="Port for the web visualization server (default: 9000)",
-    )
+    _add_init_args(init_parser)
 
     args = parser.parse_args()
+    return args
 
-    # Load task-specific config from config.toml (precedence: CLI > config.toml > config.yaml > defaults).
-    task_config = _load_task_config(Path(args.codebase_dir))
+
+def _validate_run_args(args: argparse.Namespace) -> None:
+    """Validate and post-process arguments for the 'run' subcommand."""
+    codebase_dir = Path(args.path)
+
+    # Load task-specific config from config.toml (precedence: CLI > config.toml > defaults).
+    task_config = _load_task_config(codebase_dir)
     if task_config:
         _apply_task_config(args, task_config)
-        _run_logger.info(f"Loaded config.toml from {args.codebase_dir}")
+        _run_logger.info(f"Loaded config.toml from {args.path}")
 
     # Validate arguments.
-    if not Path(args.codebase_dir).exists():
-        raise FileNotFoundError(f"codebase_dir not found: {args.codebase_dir}")
+    if not codebase_dir.exists():
+        raise FileNotFoundError(f"codebase_dir not found: {args.path}")
     if args.max_iters < 1:
         raise ValueError("max_iters must be >= 1")
     if args.patience < 1:
@@ -3625,24 +3745,35 @@ def parse_args() -> argparse.Namespace:
     if args.eval_timeout < 1:
         raise ValueError("eval_timeout must be >= 1")
 
-    # Validate required folder structure (skip for server-only mode).
-    if not getattr(args, 'server_only', False):
-        codebase_root = Path(args.codebase_dir)
-        if not (codebase_root / "experiment").is_dir():
-            raise FileNotFoundError(
-                f"Required 'experiment/' folder not found in: {codebase_root}"
-            )
-        if not (codebase_root / "TASK.md").is_file():
-            raise FileNotFoundError(
-                f"Required 'TASK.md' file not found in: {codebase_root}"
-            )
+    # Validate required folder structure.
+    if not (codebase_dir / "experiment").is_dir():
+        raise FileNotFoundError(
+            f"Required 'experiment/' folder not found in: {codebase_dir}"
+        )
+    if not (codebase_dir / "TASK.md").is_file():
+        raise FileNotFoundError(
+            f"Required 'TASK.md' file not found in: {codebase_dir}"
+        )
 
-    if not args.reset and Path(args.codebase_dir).exists():
-        state_path = Path(args.codebase_dir) / ".evorun_state.json"
+    if not args.reset and codebase_dir.exists():
+        state_path = codebase_dir / ".evorun_state.json"
         if state_path.exists():
             _run_logger.info(f"Found state file: {state_path} — resuming.")
 
-    return args
+
+def _validate_viz_args(args: argparse.Namespace) -> None:
+    """Validate and post-process arguments for the 'viz' subcommand."""
+    codebase_dir = Path(args.path)
+    if not codebase_dir.exists():
+        raise FileNotFoundError(f"codebase_dir not found: {args.path}")
+    if not (codebase_dir / "experiment").is_dir():
+        raise FileNotFoundError(
+            f"Required 'experiment/' folder not found in: {codebase_dir}"
+        )
+    if not (codebase_dir / "TASK.md").is_file():
+        raise FileNotFoundError(
+            f"Required 'TASK.md' file not found in: {codebase_dir}"
+        )
 
 
 # --------------------
@@ -3681,18 +3812,14 @@ def _split_lines(text: str) -> list[str]:
     return result
 
 
-def main() -> None:
-    """Entry point for evorun.py.
+def _cmd_run(args: argparse.Namespace) -> None:
+    """Run the optimization loop."""
+    _validate_run_args(args)
 
-    Validates inputs, parses CLI arguments, creates an instance of
-    EvoRunAgent, and runs the optimization loop.
-    """
-    _setup_logging()
-    args = parse_args()
+    codebase_root = Path(args.path)
 
     # --reset: delete all .evorun artifacts before starting.
-    if getattr(args, 'reset', False) and args.codebase_dir:
-        codebase_root = Path(args.codebase_dir)
+    if args.reset:
         _evorun_artifacts = [
             ".evorun_state.json",
             ".evorun_backup",
@@ -3711,40 +3838,16 @@ def main() -> None:
 
     # Optionally start the web visualization server in a background thread.
     _server = None
-    if getattr(args, 'server_only', False):
-        from .webapp.server import start_server
-        _server = start_server(
-            folder=str(args.codebase_dir),
-            port=args.port,
-            open_browser=True,
-        )
-        _run_logger.info(
-            f"[Server] Visualizer started on http://localhost:{args.port} (server-only mode)"
-        )
-        _server_thread = threading.Thread(
-            target=_server.serve_forever, daemon=True
-        )
-        _server_thread.start()
-        try:
-            _server_thread.join()
-        except KeyboardInterrupt:
-            _run_logger.info("[KeyboardInterrupt] User cancelled.")
-        finally:
-            _server.shutdown()
-            _run_logger.info("[Server] Visualizer stopped.")
-        sys.exit(0)
-
     if getattr(args, 'server', False):
         from .webapp.server import start_server
         _server = start_server(
-            folder=str(args.codebase_dir),
+            folder=str(args.path),
             port=args.port,
             open_browser=True,
         )
         _run_logger.info(
             f"[Server] Visualizer started on http://localhost:{args.port}"
         )
-        # Detach the server thread so it doesn't block main().
         _server_thread = threading.Thread(
             target=_server.serve_forever, daemon=True
         )
@@ -3761,13 +3864,125 @@ def main() -> None:
         _run_logger.exception("[Error] Unexpected exception in EvoRunAgent")
         sys.exit(2)
     finally:
-        # Shut down the background thread pool.
         if agent is not None and hasattr(agent, '_summary_executor'):
             agent._summary_executor.shutdown(wait=False)
-        # Stop the visualizer server.
         if _server is not None:
             _server.shutdown()
             _run_logger.info("[Server] Visualizer stopped.")
+
+
+def _cmd_viz(args: argparse.Namespace) -> None:
+    """Run the visualization server only."""
+    _validate_viz_args(args)
+
+    from .webapp.server import start_server
+    _server = start_server(
+        folder=str(args.path),
+        port=args.port,
+        open_browser=True,
+    )
+    _run_logger.info(
+        f"[Server] Visualizer started on http://localhost:{args.port}"
+    )
+    try:
+        _server.serve_forever()
+    except KeyboardInterrupt:
+        _run_logger.info("[KeyboardInterrupt] User cancelled.")
+    finally:
+        _server.shutdown()
+        _run_logger.info("[Server] Visualizer stopped.")
+
+
+def _cmd_init(args: argparse.Namespace) -> None:
+    """Initialize a new evorun project in the specified directory."""
+    init_dir = Path(args.path).resolve()
+    init_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy default config.toml from the package's example.
+    config_src = Path(__file__).parent.parent / "config.example.toml"
+    config_dst = init_dir / "config.toml"
+    if config_src.exists():
+        shutil.copy2(config_src, config_dst)
+        _run_logger.info(f"Created {config_dst}")
+    else:
+        # Fallback: write a minimal config inline.
+        config_dst.write_text(
+            "# evorun config.toml\n"
+            "llm_retries = 3\n"
+            "llm_retry_base_delay = 3.0\n"
+            "eval_cmd = \"pixi run python eval.py\"\n"
+            "optim_mode = \"max\"\n"
+            "max_iters = 50\n"
+            "time_limit = 0\n"
+            "patience = 10\n"
+            "eval_timeout = 300\n"
+            "max_children = 10\n"
+            "decay_exploration = true\n"
+            "use_fusion = true\n"
+            "fusion_min_iters = 10\n"
+            "fusion_prob = 0.5\n"
+            "fake_run = false\n"
+            "reset = false\n",
+        )
+        _run_logger.info(f"Created {config_dst}")
+
+    # Create TASK.md template.
+    task_dst = init_dir / "TASK.md"
+    task_dst.write_text(
+        "# Task Description\n"
+        "\n"
+        "## Goals\n"
+        "\n"
+        "Describe what you want to achieve.\n"
+        "\n"
+        "## Current State\n"
+        "\n"
+        "Describe the current state of the codebase.\n"
+        "\n"
+        "## Evaluation\n"
+        "\n"
+        "Describe how success will be measured (e.g., eval.py).\n"
+        "\n"
+        "## Notes\n"
+        "\n"
+        "Any additional context or constraints.\n",
+    )
+    _run_logger.info(f"Created {task_dst}")
+
+    # Create experiment/ directory placeholder.
+    exp_dir = init_dir / "experiment"
+    exp_dir.mkdir(exist_ok=True)
+    _run_logger.info(f"Created {exp_dir}/")
+
+    _run_logger.info(f"Project initialized at {init_dir}")
+
+
+def main() -> None:
+    """Entry point for evorun.
+
+    Dispatches to subcommand handlers: run, viz, init.
+    """
+    _setup_logging()
+    args = parse_args()
+
+    if args.command == "run":
+        _cmd_run(args)
+    elif args.command == "viz":
+        _cmd_viz(args)
+    elif args.command == "init":
+        _cmd_init(args)
+    else:
+        # Should not reach here since required=True on subparsers.
+        parser = argparse.ArgumentParser(
+            description="Iteratively improve a codebase using LLM-driven optimization. "
+            "With Monte Carlo Tree Search for branching exploration.",
+        )
+        subparsers = parser.add_subparsers(dest="command")
+        subparsers.add_parser("run", help="Run the optimization loop on a codebase")
+        subparsers.add_parser("viz", help="Start the web visualization server (no optimizer)")
+        subparsers.add_parser("init", help="Initialize a new evorun project")
+        parser.print_help()
+        sys.exit(1)
 
 
 

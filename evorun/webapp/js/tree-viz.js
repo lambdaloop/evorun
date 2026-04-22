@@ -413,6 +413,62 @@ function showNodeDetailToBottom(nodeData) {
       html += detailRow('Edit Summary', historyEntry.edit_summary);
     }
     html += '</div>';
+
+    // Planner input
+    if (historyEntry?.planner_input && historyEntry.planner_input.trim()) {
+      const pInput = historyEntry.planner_input;
+      const pInputLong = pInput.length > 600;
+      const pInputDisplay = pInputLong ? pInput.slice(0, 600) + '\n... (truncated, click to expand)' : pInput;
+      html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
+      html += '<h4 style="color:var(--accent-sky);margin-bottom:6px;font-size:13px;">Planner Input</h4>';
+      html += `<pre id="planner-input-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(pInputDisplay)}</pre>`;
+      if (pInputLong) {
+        html += `<button id="planner-input-expand" style="background:var(--bg-tertiary);color:var(--accent-sky);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full planner input (${pInput.length} chars)</button>`;
+      }
+      html += '</div>';
+    }
+
+    // Planner output
+    if (historyEntry?.planner_output && historyEntry.planner_output.trim()) {
+      const pOutput = historyEntry.planner_output;
+      const pOutputLong = pOutput.length > 600;
+      const pOutputDisplay = pOutputLong ? pOutput.slice(0, 600) + '\n... (truncated, click to expand)' : pOutput;
+      html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
+      html += '<h4 style="color:var(--accent-mint);margin-bottom:6px;font-size:13px;">Planner Output</h4>';
+      html += `<pre id="planner-output-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(pOutputDisplay)}</pre>`;
+      if (pOutputLong) {
+        html += `<button id="planner-output-expand" style="background:var(--bg-tertiary);color:var(--accent-mint);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full planner output (${pOutput.length} chars)</button>`;
+      }
+      html += '</div>';
+    }
+
+    // Editor input
+    if (historyEntry?.editor_input && historyEntry.editor_input.trim()) {
+      const eInput = historyEntry.editor_input;
+      const eInputLong = eInput.length > 600;
+      const eInputDisplay = eInputLong ? eInput.slice(0, 600) + '\n... (truncated, click to expand)' : eInput;
+      html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
+      html += '<h4 style="color:var(--accent-lavender);margin-bottom:6px;font-size:13px;">Editor Input</h4>';
+      html += `<pre id="editor-input-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(eInputDisplay)}</pre>`;
+      if (eInputLong) {
+        html += `<button id="editor-input-expand" style="background:var(--bg-tertiary);color:var(--accent-lavender);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full editor input (${eInput.length} chars)</button>`;
+      }
+      html += '</div>';
+    }
+
+    // Editor output
+    if (historyEntry?.editor_output && historyEntry.editor_output.trim()) {
+      const eOutput = historyEntry.editor_output;
+      const eOutputLong = eOutput.length > 600;
+      const eOutputDisplay = eOutputLong ? eOutput.slice(0, 600) + '\n... (truncated, click to expand)' : eOutput;
+      html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
+      html += '<h4 style="color:var(--accent-pink);margin-bottom:6px;font-size:13px;">Editor Output</h4>';
+      html += `<pre id="editor-output-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(eOutputDisplay)}</pre>`;
+      if (eOutputLong) {
+        html += `<button id="editor-output-expand" style="background:var(--bg-tertiary);color:var(--accent-pink);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full editor output (${eOutput.length} chars)</button>`;
+      }
+      html += '</div>';
+    }
   }
 
   // Eval output / Error output
@@ -503,6 +559,46 @@ function showNodeDetailToBottom(nodeData) {
       const fbPre = diffOutput.querySelector('#claude-feedback-display');
       if (fbPre) fbPre.textContent = historyEntry.claude_feedback;
       claudeFbExpandBtn.style.display = 'none';
+    });
+  }
+
+  // Handle planner input expand button
+  const pInputExpandBtn = diffOutput.querySelector('#planner-input-expand');
+  if (pInputExpandBtn && historyEntry?.planner_input) {
+    pInputExpandBtn.addEventListener('click', () => {
+      const pre = diffOutput.querySelector('#planner-input-display');
+      if (pre) pre.textContent = historyEntry.planner_input;
+      pInputExpandBtn.style.display = 'none';
+    });
+  }
+
+  // Handle planner output expand button
+  const pOutputExpandBtn = diffOutput.querySelector('#planner-output-expand');
+  if (pOutputExpandBtn && historyEntry?.planner_output) {
+    pOutputExpandBtn.addEventListener('click', () => {
+      const pre = diffOutput.querySelector('#planner-output-display');
+      if (pre) pre.textContent = historyEntry.planner_output;
+      pOutputExpandBtn.style.display = 'none';
+    });
+  }
+
+  // Handle editor input expand button
+  const eInputExpandBtn = diffOutput.querySelector('#editor-input-expand');
+  if (eInputExpandBtn && historyEntry?.editor_input) {
+    eInputExpandBtn.addEventListener('click', () => {
+      const pre = diffOutput.querySelector('#editor-input-display');
+      if (pre) pre.textContent = historyEntry.editor_input;
+      eInputExpandBtn.style.display = 'none';
+    });
+  }
+
+  // Handle editor output expand button
+  const eOutputExpandBtn = diffOutput.querySelector('#editor-output-expand');
+  if (eOutputExpandBtn && historyEntry?.editor_output) {
+    eOutputExpandBtn.addEventListener('click', () => {
+      const pre = diffOutput.querySelector('#editor-output-display');
+      if (pre) pre.textContent = historyEntry.editor_output;
+      eOutputExpandBtn.style.display = 'none';
     });
   }
 }
