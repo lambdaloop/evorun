@@ -32,10 +32,12 @@ function renderScoreChart() {
   scoreChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: currentProgression.map((p) => `Iter ${p.iter}`),
       datasets: [{
         label: 'Best Score',
-        data: currentProgression.map((p) => p.runningBest),
+        data: currentProgression.map((p) => ({
+          x: p.datetime ? new Date(p.datetime).getTime() : null,
+          y: p.runningBest,
+        })),
         borderColor: lineGradient,
         borderWidth: 2.5,
         pointRadius: currentProgression.map((p) => p.isImprovement ? 5 : 2),
@@ -85,7 +87,12 @@ function renderScoreChart() {
               if (!items || items.length === 0) return 'No data~ (｡•́︿•̀｡)';
               const idx = items[0].dataIndex;
               const p = currentProgression[idx];
-              return p ? `Iteration ${p.iter} ✨` : `Iteration ? ✨`;
+              if (!p) return 'Iteration ? ✨';
+              if (p.datetime) {
+                const d = new Date(p.datetime);
+                return d.toLocaleString() + ' ✨';
+              }
+              return `Iteration ${p.iter} ✨`;
             },
             label: function(item) {
               const p = currentProgression[item.dataIndex];
@@ -108,7 +115,15 @@ function renderScoreChart() {
       },
       scales: {
         x: {
-          type: 'category',
+          type: 'time',
+          time: {
+            unit: 'hour',
+            tooltipFormat: 'yyyy-MM-dd HH:mm',
+            displayFormats: {
+              hour: 'HH:mm',
+              day: 'MMM dd HH:mm',
+            },
+          },
           grid: { color: 'rgba(61, 42, 92, 0.4)', drawBorder: false },
           border: { display: false },
           ticks: {
@@ -117,10 +132,6 @@ function renderScoreChart() {
             maxRotation: 45,
             autoSkip: true,
             maxTicksLimit: 30,
-            callback: (val, idx) => {
-              const p = currentProgression[idx];
-              return p ? `Iter ${p.iter}` : `Iter ${val}`;
-            },
           },
         },
         y: {

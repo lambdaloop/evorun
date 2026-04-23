@@ -163,7 +163,7 @@ const StateLoader = (() => {
    * Build running-best-score progression over iterations.
    * Uses node scores as the authoritative data source, joined to history
    * by step number to get edit summaries.
-   * Each entry has: iter, runningBest, isImprovement, editSummary, score.
+   * Each entry has: iter, runningBest, isImprovement, editSummary, score, datetime.
    */
   function getBestProgression() {
     const nodes = getNodesByStep();
@@ -178,8 +178,7 @@ const StateLoader = (() => {
     const progression = [];
     for (const node of nodes) {
       const step = node.step;
-      const isRoot = node.stage === 'root';
-      const histEntry = isRoot ? null : historyMap.get(step);
+      const histEntry = historyMap.get(step) ?? null;
       const score = node.score;
       const isImprovement = bestScore === null || (score !== null && (maximize ? score > bestScore : score < bestScore));
       if (score !== null && isImprovement) bestScore = score;
@@ -189,6 +188,7 @@ const StateLoader = (() => {
         isImprovement,
         editSummary: (isImprovement && histEntry && histEntry.edit_summary) ? histEntry.edit_summary : null,
         score,
+        datetime: histEntry?.datetime ?? null,
       });
     }
     return progression;
