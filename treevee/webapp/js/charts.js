@@ -133,11 +133,12 @@ const labelPlugin = {
     };
 
     // Collect all label info.
+    const all_iters = currentProgression.map(p => p.iter).filter(i => i !== null);
+    const midIter = (Math.min(...all_iters) + Math.max(...all_iters)) / 2;
     const labels = [];
     ctx.save();
     ctx.font = '9px sans-serif';
 
-    let labelIndex = 0;
     for (const p of currentProgression) {
       if (p.isRoot || !p.editSummary || p.score === null) continue;
       const px = xScale.getPixelForValue(p.iter);
@@ -147,149 +148,74 @@ const labelPlugin = {
       const boxW = Math.min(Math.max(...lines.map((l) => ctx.measureText(l).width)), MAX_TEXT_W) + 12;
       const boxH = lines.length * 12 + (lines.length - 1) * 2 + 10;
 
-      // Smart horizontal positioning: use the side with more available space.
-      // Add slight horizontal offset variation to spread labels out.
-      const horizontalVariation = (labelIndex % 3 - 1) * 15;
-      const spaceLeft = px - canvasBounds.left;
-      const spaceRight = canvasBounds.right - px;
+      // Horizontal: deterministic side choice based on data point position,
+      // never flips on resize. Right side for iter >= midpoint, left otherwise.
       let boxX;
-      if (spaceRight >= boxW + OFFSET) {
-        // Enough space on the right - position to the right of the point.
-        boxX = px + OFFSET + Math.max(0, horizontalVariation);
-      } else if (spaceLeft >= boxW + OFFSET) {
-        // Not enough space on right but enough on left - position to the left.
-        boxX = px - boxW - OFFSET + Math.min(0, horizontalVariation);
-      } else if (spaceRight > spaceLeft) {
-        // Neither side has full space, use the side with more room (right-aligned to edge).
-        boxX = canvasBounds.right - boxW;
+      if (p.iter >= midIter) {
+        boxX = px + OFFSET;
       } else {
-        // Use left side (left-aligned to edge).
-        boxX = canvasBounds.left;
+        boxX = px - boxW - OFFSET;
       }
 
-      // Prefer labels above the line when minimizing, below when maximizing.
-      const spaceAbove = py - canvasBounds.top;
-      const spaceBelow = canvasBounds.bottom - py;
-      const verticalVariation = (labelIndex % 3 - 1) * 10;
+      // Vertical: snug against the data point, above when minimizing, below when maximizing.
       const preferBelow = maximize;
-
       let boxY;
       if (preferBelow) {
-        if (spaceBelow >= boxH + OFFSET) {
-          boxY = py + OFFSET + verticalVariation;
-        } else if (spaceAbove >= boxH + OFFSET) {
-          boxY = py - OFFSET - boxH + verticalVariation;
-        } else {
-          boxY = py + OFFSET + verticalVariation;
-        }
+        boxY = py + OFFSET;
       } else {
-        if (spaceAbove >= boxH + OFFSET) {
-          boxY = py - OFFSET - boxH + verticalVariation;
-        } else if (spaceBelow >= boxH + OFFSET) {
-          boxY = py + OFFSET + verticalVariation;
-        } else {
-          boxY = py - OFFSET - boxH + verticalVariation;
-        }
+        boxY = py - OFFSET - boxH;
       }
 
       const idx = currentProgression.indexOf(p);
-      labels.push({ idx, boxX, boxY, boxW, boxH, lines, px, py });
-      labelIndex++;
+      labels.push({ idx, iter: p.iter, boxX, boxY, boxW, boxH, lines, px, py });
     }
     ctx.restore();
 
-    // --- Phase 1: All-pairs label-label overlap resolution (iterative) ---
-    const MIN_GAP = 8;
-    for (let iter = 0; iter < 20; iter++) {
-      let hadOverlap = false;
+    // --- Deterministic label placement with canonical overlap resolution ---
+    // No force simulation — side choice and overlap detection are width-independent.
+    // This eliminates resize instability (labels don't wiggle on window resize).
+    const GAP = 12;
+
+    // Compute canonical horizontal positions for overlap detection.
+    // These are based on iteration ordering, not canvas width.
+    const canonX = {};
+    labels.forEach((l, i) => {
+      if (l.iter >= midIter) {
+        canonX[i] = l.iter * 20 + 12;
+      } else {
+        canonX[i] = l.iter * 20 - l.boxW - 12;
+      }
+    });
+
+    // Resolve label-label overlaps by shifting labels vertically only.
+    // Uses canonical horizontal positions for width-independent detection.
+    let changed = true;
+    let iterCount = 0;
+    while (changed && iterCount < 50) {
+      changed = false;
+      iterCount++;
       for (let i = 0; i < labels.length; i++) {
         for (let j = i + 1; j < labels.length; j++) {
-          const a = { x: labels[i].boxX, y: labels[i].boxY, w: labels[i].boxW, h: labels[i].boxH };
-          const b = { x: labels[j].boxX, y: labels[j].boxY, w: labels[j].boxW, h: labels[j].boxH };
-          if (_boxesOverlap(a, b)) {
-            hadOverlap = true;
-            // Push labels apart based on relative position, not maximize direction.
-            const aCenterY = labels[i].boxY + labels[i].boxH / 2;
-            const bCenterY = labels[j].boxY + labels[j].boxH / 2;
-            const overlapAmount = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-            const halfShift = (overlapAmount + MIN_GAP) / 2;
-
-            if (aCenterY <= bCenterY) {
-              // a is above b — push a up, push b down
-              labels[i].boxY -= halfShift;
-              labels[j].boxY += halfShift;
-            } else {
-              // a is below b — push a down, push b up
-              labels[i].boxY += halfShift;
-              labels[j].boxY -= halfShift;
-            }
-            // Clamp both to canvas bounds.
-            labels[i].boxX = Math.max(canvasBounds.left, Math.min(labels[i].boxX, canvasBounds.right - labels[i].boxW));
-            labels[i].boxY = Math.max(canvasBounds.top, Math.min(labels[i].boxY, canvasBounds.bottom - labels[i].boxH));
-            labels[j].boxX = Math.max(canvasBounds.left, Math.min(labels[j].boxX, canvasBounds.right - labels[j].boxW));
-            labels[j].boxY = Math.max(canvasBounds.top, Math.min(labels[j].boxY, canvasBounds.bottom - labels[j].boxH));
+          const li = labels[i], lj = labels[j];
+          const cxI = canonX[i], cxJ = canonX[j];
+          // Horizontal overlap using canonical positions
+          if (cxI + li.boxW <= cxJ + GAP) continue;
+          if (cxJ + lj.boxW <= cxI + GAP) continue;
+          // Vertical overlap
+          if (li.boxY + li.boxH + GAP <= lj.boxY) continue;
+          if (lj.boxY + lj.boxH + GAP <= li.boxY) continue;
+          // Push lower-score label down
+          if (lj.score >= li.score) {
+            lj.boxY = li.boxY + li.boxH + GAP;
+          } else {
+            li.boxY = lj.boxY + lj.boxH + GAP;
           }
-        }
-      }
-      if (!hadOverlap) break;
-    }
-
-    // --- Phase 2: Avoid data points (path + discarded) ---
-    const pointPositions = [];
-    for (const p of currentProgression) {
-      if (p.score !== null) {
-        pointPositions.push({ x: xScale.getPixelForValue(p.iter), y: yScale.getPixelForValue(p.score) });
-      }
-    }
-    for (const n of _chartDiscarded) {
-      if (n.score !== null) {
-        pointPositions.push({ x: xScale.getPixelForValue(n.step), y: yScale.getPixelForValue(n.score) });
-      }
-    }
-    for (const l of labels) {
-      for (const pt of pointPositions) {
-        if (_boxOverlapsPoint(l, pt.x, pt.y, 10)) {
-          _shiftAway(l, { x: pt.x - 10, y: pt.y - 10, w: 20, h: 20 }, maximize, canvasBounds);
+          changed = true;
         }
       }
     }
 
-    // --- Phase 3: Avoid step line segments (stepped: 'before') ---
-    for (let i = 0; i < currentProgression.length - 1; i++) {
-      const p0 = currentProgression[i];
-      const p1 = currentProgression[i + 1];
-      if (p0.score === null || p1.score === null) continue;
-      const x0 = xScale.getPixelForValue(p0.iter);
-      const y0 = yScale.getPixelForValue(p0.score);
-      const x1 = xScale.getPixelForValue(p1.iter);
-      const y1 = yScale.getPixelForValue(p1.score);
-
-      // Vertical segment from (x0, y0) to (x0, y1).
-      const vSeg = {
-        x: x0 - 4,
-        y: Math.min(y0, y1) - 2,
-        w: 8,
-        h: Math.abs(y1 - y0) + 4,
-      };
-      // Horizontal segment from (x0, y1) to (x1, y1).
-      const hSeg = {
-        x: Math.min(x0, x1) - 2,
-        y: y1 - 4,
-        w: Math.abs(x1 - x0) + 4,
-        h: 8,
-      };
-
-      for (const l of labels) {
-        if (_boxesOverlap({ x: l.boxX, y: l.boxY, w: l.boxW, h: l.boxH }, vSeg)) {
-          _shiftAway(l, vSeg, maximize, canvasBounds);
-        }
-        if (_boxesOverlap({ x: l.boxX, y: l.boxY, w: l.boxW, h: l.boxH }, hSeg)) {
-          _shiftAway(l, hSeg, maximize, canvasBounds);
-        }
-      }
-    }
-
-    // Final clamp: ensure all labels are within canvas bounds after all adjustments.
+    // Final clamp: ensure all labels are within canvas bounds.
     for (const l of labels) {
       l.boxX = Math.max(canvasBounds.left, Math.min(l.boxX, canvasBounds.right - l.boxW));
       l.boxY = Math.max(canvasBounds.top, Math.min(l.boxY, canvasBounds.bottom - l.boxH));

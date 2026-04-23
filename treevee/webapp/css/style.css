@@ -50,7 +50,7 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.6;
-  font-size: 14px;
+  font-size: 16px;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
   position: relative;
@@ -133,7 +133,7 @@ header h1::after {
 }
 
 header .subtitle {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-muted);
   letter-spacing: 0.3px;
   margin-bottom: 18px;
@@ -195,7 +195,7 @@ header .subtitle {
 
 .summary-card .label {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   color: var(--text-secondary);
   letter-spacing: 0.8px;
@@ -229,7 +229,7 @@ header .subtitle {
 /* ── Section headers with cute decorations ── */
 
 section h2 {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   margin-bottom: 16px;
   color: var(--text-primary);
@@ -337,7 +337,7 @@ section h2::after {
 }
 
 #tree-panel h2, #iterations-panel h2 {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   margin-bottom: 12px;
   color: var(--text-primary);
@@ -361,7 +361,7 @@ section h2::after {
   border: 1px solid var(--border-color);
   padding: 5px 14px;
   border-radius: var(--radius-pill);
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   font-weight: 600;
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -432,7 +432,7 @@ section h2::after {
 .tree-toggle {
   width: 16px;
   text-align: center;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -459,7 +459,7 @@ section h2::after {
 }
 
 .tree-label {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -467,7 +467,7 @@ section h2::after {
 }
 
 .tree-depth-badge {
-  font-size: 9px;
+  font-size: 11px;
   padding: 2px 6px;
   border-radius: var(--radius-pill);
   background: var(--bg-tertiary);
@@ -483,7 +483,7 @@ section h2::after {
 }
 
 .tree-score {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   padding: 2px 8px;
   border-radius: var(--radius-pill);
@@ -517,13 +517,13 @@ section h2::after {
 }
 
 .tree-meta {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .tree-arrow {
-  font-size: 10px;
+  font-size: 12px;
   flex-shrink: 0;
   width: 12px;
   text-align: center;
@@ -540,7 +540,7 @@ section h2::after {
 }
 
 .tree-info-btn {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   flex-shrink: 0;
   cursor: pointer;
@@ -559,7 +559,7 @@ section h2::after {
 }
 
 .tree-child-count {
-  font-size: 9px;
+  font-size: 11px;
   padding: 1px 6px;
   border-radius: var(--radius-pill);
   background: var(--bg-tertiary);
@@ -625,9 +625,9 @@ section h2::after {
 
 .iteration-emoji {
   flex-shrink: 0;
-  width: 16px;
+  width: 18px;
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .iteration-diff .diff-inline {
@@ -640,7 +640,7 @@ section h2::after {
   border: 1px solid var(--border-color);
   padding: 5px 12px;
   border-radius: var(--radius-pill);
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   margin-top: 6px;
   font-weight: 600;
@@ -669,7 +669,7 @@ section h2::after {
   overflow: auto;
   max-height: 400px;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.6;
   transition: border-color 0.2s ease;
 }
@@ -708,7 +708,7 @@ section h2::after {
 
 .iteration-num {
   font-weight: 700;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--accent-pink);
   flex-shrink: 0;
   min-width: 36px;
@@ -717,7 +717,7 @@ section h2::after {
 
 .iteration-score {
   font-weight: 700;
-  font-size: 11px;
+  font-size: 13px;
   flex-shrink: 0;
   min-width: 52px;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
@@ -728,7 +728,7 @@ section h2::after {
 .iteration-score.no-change { color: var(--text-muted); }
 
 .iteration-badge {
-  font-size: 9px;
+  font-size: 11px;
   padding: 1px 5px;
   border-radius: var(--radius-pill);
   font-weight: 700;
@@ -748,7 +748,7 @@ section h2::after {
 }
 
 .iteration-summary {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -792,7 +792,7 @@ section h2::after {
 }
 
 #diff-section h2 {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   margin-bottom: 12px;
 }
@@ -809,7 +809,7 @@ section h2::after {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-secondary);
 }
 
@@ -819,7 +819,7 @@ section h2::after {
   border: 1px solid var(--border-color);
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: 15px;
   transition: border-color 0.25s ease;
   font-family: inherit;
 }
@@ -836,7 +836,7 @@ section h2::after {
   border: none;
   padding: 7px 16px;
   border-radius: var(--radius-pill);
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
   font-weight: 700;
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -865,7 +865,7 @@ section h2::after {
   overflow: auto;
   max-height: 500px;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
   transition: border-color 0.2s ease;
 }
@@ -901,7 +901,7 @@ section h2::after {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 8px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   align-items: center;
 }
@@ -934,7 +934,7 @@ section h2::after {
   display: flex;
   align-items: baseline;
   padding: 3px 0;
-  font-size: 12px;
+  font-size: 14px;
   gap: 6px;
   transition: transform 0.15s ease;
 }
@@ -955,7 +955,7 @@ section h2::after {
 .cute-footer {
   text-align: center;
   padding: 28px 0 12px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.4px;
 }
@@ -1015,7 +1015,7 @@ section h2::after {
   border: none;
   padding: 7px 18px;
   border-radius: var(--radius-pill);
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
   font-weight: 700;
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
