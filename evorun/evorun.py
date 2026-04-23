@@ -3932,7 +3932,9 @@ def _cmd_init(args: argparse.Namespace) -> None:
     # Copy default config.toml from the package's example.
     config_src = Path(__file__).parent.parent / "config.example.toml"
     config_dst = init_dir / "config.toml"
-    if config_src.exists():
+    if config_dst.exists():
+        _run_logger.info(f"Skipping {config_dst} — already exists")
+    elif config_src.exists():
         shutil.copy2(config_src, config_dst)
         _run_logger.info(f"Created {config_dst}")
     else:
@@ -3959,26 +3961,29 @@ def _cmd_init(args: argparse.Namespace) -> None:
 
     # Create TASK.md template.
     task_dst = init_dir / "TASK.md"
-    task_dst.write_text(
-        "# Task Description\n"
-        "\n"
-        "## Goals\n"
-        "\n"
-        "Describe what you want to achieve.\n"
-        "\n"
-        "## Current State\n"
-        "\n"
-        "Describe the current state of the codebase.\n"
-        "\n"
-        "## Evaluation\n"
-        "\n"
-        "Describe how success will be measured (e.g., eval.py).\n"
-        "\n"
-        "## Notes\n"
-        "\n"
-        "Any additional context or constraints.\n",
-    )
-    _run_logger.info(f"Created {task_dst}")
+    if task_dst.exists():
+        _run_logger.info(f"Skipping {task_dst} — already exists")
+    else:
+        task_dst.write_text(
+            "# Task Description\n"
+            "\n"
+            "## Goals\n"
+            "\n"
+            "Describe what you want to achieve.\n"
+            "\n"
+            "## Current State\n"
+            "\n"
+            "Describe the current state of the codebase.\n"
+            "\n"
+            "## Evaluation\n"
+            "\n"
+            "Describe how success will be measured (e.g., eval.py).\n"
+            "\n"
+            "## Notes\n"
+            "\n"
+            "Any additional context or constraints.\n",
+        )
+        _run_logger.info(f"Created {task_dst}")
 
     # Create experiment/ directory placeholder.
     exp_dir = init_dir / "experiment"
