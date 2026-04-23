@@ -24,7 +24,6 @@ Implement `approx_voigt_batch(x_array, sigma, gamma)` that approximates the Voig
 ## Files You Can Modify
 
 - `experiment/voigt.py` — the approximation implementation
-- `experiment/config.py` — configuration (N_POINTS, N_REPEATS, METHOD)
 
 You may **NOT** modify:
 - `eval.py` — the evaluation harness
@@ -64,13 +63,11 @@ Each case evaluates on a grid of 10,000 x points over `[-5, 5]`.
 ## Scoring
 
 ```
-mse_penalty    = exp(-avg_MSE * 50000)
-speed_ratio    = scipy_time / approx_time   (> 1 means faster than scipy)
-normalized_speed = clamp(speed_ratio, 0, 1)
-score          = normalized_speed * mse_penalty
+speed_ratio    = approx_time / ref_time   (< 1 means faster than scipy)
+score          = (avg_MSE / 0.01) + (speed_ratio / 10.0)
 ```
 
-The goal is to be **both accurate** (low MSE) and **fast** (faster than or comparable to scipy's wofz). Current baseline: score ~0.1-0.3.
+Both terms are normalized to [0, 1], so the score ranges from 0 (perfect) to ~2 (worst). The goal is to be **both accurate** (low MSE) and **fast** (faster than or comparable to scipy's wofz). Current baseline: score ~0.72.
 
 ## Constraints
 

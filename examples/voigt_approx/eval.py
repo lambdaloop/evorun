@@ -17,7 +17,10 @@ import numpy as np
 from scipy.special import wofz
 
 from experiment.voigt import approx_voigt_batch
-from experiment.config import N_POINTS, N_REPEATS, METHOD
+
+# ── Evaluation parameters (do not modify) ──
+N_POINTS = 10000  # x points per (sigma, gamma) test case
+N_REPEATS = 10    # timing measurement repeats
 
 
 # Test cases: (sigma, gamma) pairs covering different regimes
@@ -86,19 +89,16 @@ def evaluate():
     avg_ref_time_ms = (total_ref_time / len(TEST_CASES)) * 1000
     avg_approx_time_ms = (total_approx_time / len(TEST_CASES)) * 1000
 
-    mse_penalty = math.exp(-avg_mse * 50000)
-    # Speed score: how much faster than scipy's wofz (>=1x is perfect)
-    speed_ratio = total_ref_time / max(total_approx_time, 1e-12)
-    normalized_speed = max(0.0, min(1.0, speed_ratio))
-
-    score = normalized_speed * mse_penalty
+    # Normalize both terms to [0, 1] range for balanced optimization
+    speed_ratio = total_approx_time / max(total_ref_time, 1e-12)
+    score = (avg_mse / 0.01) + (speed_ratio / 10.0)
 
     description = (
         f"MSE={avg_mse:.2e}, "
         f"ref={avg_ref_time_ms:.2f}ms, "
         f"approx={avg_approx_time_ms:.2f}ms, "
         f"speed={speed_ratio:.2f}x, "
-        f"acc={mse_penalty:.4f} | "
+        f"score={score:.4f} | "
         + "; ".join(details)
     )
 
