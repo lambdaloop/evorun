@@ -1082,7 +1082,7 @@ Produce a concise plan following this structure.
                 cwd=str(self.codebase.codebase_dir),
                 model=self.planner_model,
                 env_overrides=planner_env,
-                max_turns=30,
+                max_turns=60 if self.enable_web_search else 30,
                 allowed_tools=['Read', 'WebSearch'] if self.enable_web_search else ['Read'],
                 log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
