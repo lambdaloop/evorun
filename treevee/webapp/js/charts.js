@@ -77,38 +77,234 @@ function _drawLabelBox(ctx, boxX, boxY, boxW, boxH, isHovered) {
   }
 }
 
-// AABB overlap test for two label boxes.
-function _boxesOverlap(a, b) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
+/**
+ * Place label boxes near data points to minimize visual clutter.
+ * All math is done in pixel space to avoid coordinate mismatches.
+ * Points with labelW=0 are treated as unlabeled (used only for collision).
+ *
+ * @param {{left:number, top:number, right:number, bottom:number}} bounds - Usable area
+ * @param {number[]} pointsX - X positions of ALL data points in pixels
+ * @param {number[]} pointsY - Y positions of ALL data points in pixels
+ * @param {number[]} labelW - Width of each label box (0 = no label)
+ * @param {number[]} labelH - Height of each label box (0 = no label)
+ * @returns {Array<[number, number]>} Label box centers in pixels (same length as points)
+ */
+function placeLabels(bounds, pointsX, pointsY, labelW, labelH) {
+  const POINT_R = 8;
 
-// Check if a box overlaps a point (with a small radius).
-function _boxOverlapsPoint(box, px, py, radius) {
-  // Expand the box by the radius and test AABB against a point-expanded box.
-  const expanded = { x: box.x - radius, y: box.y - radius, w: box.w + 2 * radius, h: box.h + 2 * radius };
-  return expanded.x <= px && expanded.x + expanded.w >= px && expanded.y <= py && expanded.y + expanded.h >= py;
-}
+  const n = pointsX.length;
+  if (n === 0) return [];
 
-// Shift a label box away from an obstacle (another box or a point).
-function _shiftAway(label, obstacle, maximize, bounds) {
-  const labelBox = { x: label.boxX, y: label.boxY, w: label.boxW, h: label.boxH };
-  if (!_boxesOverlap(labelBox, obstacle)) return false;
+  // 1. Generate 24 candidate positions per labeled point (close + far rings).
+  //    Unlabeled points (w=0) get no candidates — they only serve as obstacles.
+  const candidates = [];
+  for (let i = 0; i < n; i++) {
+    const w = labelW[i], h = labelH[i];
+    if (w === 0 || h === 0) {
+      candidates.push([]);
+      continue;
+    }
+    const px = pointsX[i], py = pointsY[i];
+    const vy = h / 2 + POINT_R + 6;
+    const vx = w / 2 + POINT_R + 6;
+    const vyFar = vy + 25;
+    const vxFar = vx + 25;
 
-  // Push label away from obstacle based on relative position, not maximize direction.
-  const labelCenterY = label.boxY + label.boxH / 2;
-  const obstacleCenterY = obstacle.y + obstacle.h / 2;
+    const raw = [
+      [px, py - vy],
+      [px, py + vy],
+      [px + w * 0.3, py - vy],
+      [px - w * 0.3, py - vy],
+      [px + w * 0.3, py + vy],
+      [px - w * 0.3, py + vy],
+      [px + vx, py],
+      [px - vx, py],
+      [px + w * 0.15, py - vy],
+      [px - w * 0.15, py - vy],
+      [px + w * 0.15, py + vy],
+      [px - w * 0.15, py + vy],
+      [px + w * 0.6, py - vy],
+      [px - w * 0.6, py - vy],
+      [px + w * 0.6, py + vy],
+      [px - w * 0.6, py + vy],
+      [px, py - vyFar],
+      [px, py + vyFar],
+      [px + w * 0.3, py - vyFar],
+      [px - w * 0.3, py - vyFar],
+      [px + w * 0.3, py + vyFar],
+      [px - w * 0.3, py + vyFar],
+      [px + vxFar, py],
+      [px - vxFar, py],
+    ];
 
-  let shiftedY;
-  if (labelCenterY <= obstacleCenterY) {
-    // Label is above obstacle — push it further up.
-    shiftedY = obstacle.y - label.boxH - 8;
-  } else {
-    // Label is below obstacle — push it further down.
-    shiftedY = obstacle.y + obstacle.h + 8;
+    const seen = new Set();
+    const clamped = [];
+    for (const [cx, cy] of raw) {
+      const clX = Math.max(bounds.left + w / 2, Math.min(bounds.right - w / 2, cx));
+      const clY = Math.max(bounds.top + h / 2, Math.min(bounds.bottom - h / 2, cy));
+      const key = `${Math.round(clX * 100)},${Math.round(clY * 100)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        clamped.push([clX, clY]);
+      }
+    }
+    candidates.push(clamped);
   }
-  const clampedY = Math.max(bounds.top, Math.min(shiftedY, bounds.bottom - label.boxH));
-  label.boxY = clampedY;
-  return true;
+
+  // 2. Geometry helpers (pixel coords)
+  function _onSeg(ax, ay, bx, by, px, py) {
+    return Math.min(ax, bx) <= px && px <= Math.max(ax, bx) &&
+           Math.min(ay, by) <= py && py <= Math.max(ay, by);
+  }
+
+  function _segSegInt(x1, y1, x2, y2, x3, y3, x4, y4) {
+    function ccw(ax, ay, bx, by, cx, cy) {
+      return (cy - ay) * (bx - ax) - (by - ay) * (cx - ax);
+    }
+    const d1 = ccw(x3, y3, x4, y4, x1, y1);
+    const d2 = ccw(x3, y3, x4, y4, x2, y2);
+    const d3 = ccw(x1, y1, x2, y2, x3, y3);
+    const d4 = ccw(x1, y1, x2, y2, x4, y4);
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+    if (d1 === 0 && _onSeg(x3, y3, x4, y4, x1, y1)) return true;
+    if (d2 === 0 && _onSeg(x3, y3, x4, y4, x2, y2)) return true;
+    if (d3 === 0 && _onSeg(x1, y1, x2, y2, x3, y3)) return true;
+    if (d4 === 0 && _onSeg(x1, y1, x2, y2, x4, y4)) return true;
+    return false;
+  }
+
+  function _segRect(x1, y1, x2, y2, rcx, rcy, rw, rh) {
+    const hw = rw / 2, hh = rh / 2;
+    if (rcx - hw <= x1 && x1 <= rcx + hw && rcy - hh <= y1 && y1 <= rcy + hh) return true;
+    if (rcx - hw <= x2 && x2 <= rcx + hw && rcy - hh <= y2 && y2 <= rcy + hh) return true;
+    for (const [ex1, ey1, ex2, ey2] of [
+      [rcx - hw, rcy - hh, rcx + hw, rcy - hh],
+      [rcx - hw, rcy + hh, rcx + hw, rcy + hh],
+      [rcx - hw, rcy - hh, rcx - hw, rcy + hh],
+      [rcx + hw, rcy - hh, rcx + hw, rcy + hh],
+    ]) {
+      if (_segSegInt(x1, y1, x2, y2, ex1, ey1, ex2, ey2)) return true;
+    }
+    return false;
+  }
+
+  // Matches Chart.js stepped:'before' — horizontal at y1 to x2, then vertical at x2
+  function _steppedSegRect(x1, y1, x2, y2, rcx, rcy, rw, rh) {
+    return _segRect(x1, y1, x2, y1, rcx, rcy, rw, rh) ||
+           _segRect(x2, y1, x2, y2, rcx, rcy, rw, rh);
+  }
+
+  function _labelOverlap(lx1, ly1, lw1, lh1, lx2, ly2, lw2, lh2) {
+    const ox = Math.max(0, Math.min(lx1 + lw1 / 2, lx2 + lw2 / 2) - Math.max(lx1 - lw1 / 2, lx2 - lw2 / 2));
+    const oy = Math.max(0, Math.min(ly1 + lh1 / 2, ly2 + lh2 / 2) - Math.max(ly1 - lh1 / 2, ly2 - lh2 / 2));
+    return (ox * oy) / (lw1 * lh1);
+  }
+
+  // 3. Greedy assignment (left-to-right)
+  const placed = new Array(n).fill(null);  // each entry: [cx, cy, w, h] or null
+  const nLabeled = labelW.filter(w => w > 0).length;
+  const maxSegments = Math.max(n - 1, 1);
+  const maxLabelPairs = Math.max(nLabeled * (nLabeled - 1) / 2, 1);
+  const bw = bounds.right - bounds.left, bh = bounds.bottom - bounds.top;
+  const canvasDiag = Math.sqrt(bw * bw + bh * bh);
+
+  for (let i = 0; i < n; i++) {
+    const w = labelW[i], h = labelH[i];
+    if (w === 0 || h === 0) continue;
+
+    let bestCand = null;
+    let bestCost = Infinity;
+
+    for (const [cx, cy] of candidates[i]) {
+      // Hard-filter: skip candidates overlapping own point
+      if (Math.abs(cx - pointsX[i]) <= w / 2 + POINT_R &&
+          Math.abs(cy - pointsY[i]) <= h / 2 + POINT_R) continue;
+
+      let cost = 0;
+      // Point overlap penalty — all other points
+      for (let k = 0; k < n; k++) {
+        if (k === i) continue;
+        if (Math.abs(cx - pointsX[k]) <= w / 2 + POINT_R &&
+            Math.abs(cy - pointsY[k]) <= h / 2 + POINT_R) {
+          cost += 10.0;
+        }
+      }
+      // Line segment penalty (stepped:'before')
+      for (let k = 0; k < n - 1; k++) {
+        if (_steppedSegRect(pointsX[k], pointsY[k], pointsX[k + 1], pointsY[k + 1], cx, cy, w, h)) {
+          cost += 10.0 / maxSegments;
+        }
+      }
+      // Label-label overlap
+      for (let k = 0; k < n; k++) {
+        if (k === i || !placed[k]) continue;
+        cost += 15.0 / maxLabelPairs * _labelOverlap(cx, cy, w, h, placed[k][0], placed[k][1], placed[k][2], placed[k][3]);
+      }
+      // Proximity bonus
+      const dx = cx - pointsX[i];
+      const dy = cy - pointsY[i];
+      const distNorm = Math.sqrt(dx * dx + dy * dy) / canvasDiag;
+      cost -= 0.5 * (1.0 - Math.tanh(distNorm / 0.05));
+
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestCand = [cx, cy];
+      }
+    }
+    placed[i] = bestCand ? [bestCand[0], bestCand[1], w, h] : [pointsX[i], pointsY[i], w, h];
+  }
+
+  // 4. Refinement passes with convergence check
+  for (let pass = 0; pass < 10; pass++) {
+    let moved = false;
+    for (let i = 0; i < n; i++) {
+      const w = labelW[i], h = labelH[i];
+      if (w === 0 || h === 0) continue;
+
+      let bestCand = null;
+      let bestCost = Infinity;
+
+      for (const [cx, cy] of candidates[i]) {
+        if (Math.abs(cx - pointsX[i]) <= w / 2 + POINT_R &&
+            Math.abs(cy - pointsY[i]) <= h / 2 + POINT_R) continue;
+
+        let cost = 0;
+        for (let k = 0; k < n; k++) {
+          if (k === i) continue;
+          if (Math.abs(cx - pointsX[k]) <= w / 2 + POINT_R &&
+              Math.abs(cy - pointsY[k]) <= h / 2 + POINT_R) {
+            cost += 10.0;
+          }
+        }
+        for (let k = 0; k < n - 1; k++) {
+          if (_steppedSegRect(pointsX[k], pointsY[k], pointsX[k + 1], pointsY[k + 1], cx, cy, w, h)) {
+            cost += 10.0 / maxSegments;
+          }
+        }
+        for (let k = 0; k < n; k++) {
+          if (k === i || !placed[k]) continue;
+          cost += 15.0 / maxLabelPairs * _labelOverlap(cx, cy, w, h, placed[k][0], placed[k][1], placed[k][2], placed[k][3]);
+        }
+        const dx = cx - pointsX[i];
+        const dy = cy - pointsY[i];
+        const distNorm = Math.sqrt(dx * dx + dy * dy) / canvasDiag;
+        cost -= 0.5 * (1.0 - Math.tanh(distNorm / 0.05));
+
+        if (cost < bestCost) {
+          bestCost = cost;
+          bestCand = [cx, cy];
+        }
+      }
+      if (bestCand && (bestCand[0] !== placed[i][0] || bestCand[1] !== placed[i][1])) {
+        moved = true;
+        placed[i] = [bestCand[0], bestCand[1], w, h];
+      }
+    }
+    if (!moved) break;
+  }
+
+  return placed.map(p => p ? [p[0], p[1]] : [0, 0]);
 }
 
 // Boxed edit-summary labels near each improvement point, with leader lines.
@@ -116,112 +312,65 @@ const labelPlugin = {
   id: 'improvementLabels',
 
   beforeDraw(chart) {
-    const { ctx, scales: { x: xScale, y: yScale }, chartArea } = chart;
-    const maximize = StateLoader.getMaximize();
-    const OFFSET = 12;
+    const { ctx, scales: { x: xScale, y: yScale } } = chart;
     const MAX_TEXT_W = 110;
 
-    // Use CSS-pixel dimensions (chart.width/height), not physical pixels
-    // (chart.canvas.width/height), since Chart.js draws in CSS-pixel space.
-    const CANVAS_MARGIN = 10;
-    const BOTTOM_MARGIN = 30;
-    const canvasBounds = {
-      top: CANVAS_MARGIN,
-      bottom: chart.height - BOTTOM_MARGIN,
-      left: CANVAS_MARGIN,
-      right: chart.width - CANVAS_MARGIN
-    };
+    const areaBounds = chart.chartArea;
 
-    // Collect all label info.
-    const all_iters = currentProgression.map(p => p.iter).filter(i => i !== null);
-    const midIter = (Math.min(...all_iters) + Math.max(...all_iters)) / 2;
+    // Pass ALL progression points to the algorithm so it knows about every
+    // line segment and data point.  Non-labeled points get 0×0 label size.
+    const allX = [];
+    const allY = [];
+    const allW = [];
+    const allH = [];
+    const labelIndices = [];  // indices into the all* arrays that have real labels
     const labels = [];
+
     ctx.save();
     ctx.font = '9px sans-serif';
 
+    let dataIdx = 0;
     for (const p of currentProgression) {
-      if (p.isRoot || !p.editSummary || p.score === null) continue;
+      if (p.score === null) continue;
       const px = xScale.getPixelForValue(p.iter);
       const py = yScale.getPixelForValue(p.score);
+      allX.push(px);
+      allY.push(py);
 
-      const lines = wrapText(ctx, p.editSummary, MAX_TEXT_W);
-      const boxW = Math.min(Math.max(...lines.map((l) => ctx.measureText(l).width)), MAX_TEXT_W) + 12;
-      const boxH = lines.length * 12 + (lines.length - 1) * 2 + 10;
-
-      // Horizontal: deterministic side choice based on data point position,
-      // never flips on resize. Right side for iter >= midpoint, left otherwise.
-      let boxX;
-      if (p.iter >= midIter) {
-        boxX = px + OFFSET;
+      const hasLabel = !p.isRoot && p.editSummary;
+      if (hasLabel) {
+        const lines = wrapText(ctx, p.editSummary, MAX_TEXT_W);
+        const boxW = Math.min(Math.max(...lines.map((l) => ctx.measureText(l).width)), MAX_TEXT_W) + 12;
+        const boxH = lines.length * 12 + (lines.length - 1) * 2 + 10;
+        allW.push(boxW);
+        allH.push(boxH);
+        labelIndices.push(allX.length - 1);
+        labels.push({ idx: dataIdx, iter: p.iter, lines, px, py, score: p.score });
+        dataIdx++;
       } else {
-        boxX = px - boxW - OFFSET;
+        allW.push(0);
+        allH.push(0);
       }
-
-      // Vertical: snug against the data point, above when minimizing, below when maximizing.
-      const preferBelow = maximize;
-      let boxY;
-      if (preferBelow) {
-        boxY = py + OFFSET;
-      } else {
-        boxY = py - OFFSET - boxH;
-      }
-
-      const idx = currentProgression.indexOf(p);
-      labels.push({ idx, iter: p.iter, boxX, boxY, boxW, boxH, lines, px, py });
     }
     ctx.restore();
 
-    // --- Deterministic label placement with canonical overlap resolution ---
-    // No force simulation — side choice and overlap detection are width-independent.
-    // This eliminates resize instability (labels don't wiggle on window resize).
-    const GAP = 12;
-
-    // Compute canonical horizontal positions for overlap detection.
-    // These are based on iteration ordering, not canvas width.
-    const canonX = {};
-    labels.forEach((l, i) => {
-      if (l.iter >= midIter) {
-        canonX[i] = l.iter * 20 + 12;
-      } else {
-        canonX[i] = l.iter * 20 - l.boxW - 12;
-      }
-    });
-
-    // Resolve label-label overlaps by shifting labels vertically only.
-    // Uses canonical horizontal positions for width-independent detection.
-    let changed = true;
-    let iterCount = 0;
-    while (changed && iterCount < 50) {
-      changed = false;
-      iterCount++;
-      for (let i = 0; i < labels.length; i++) {
-        for (let j = i + 1; j < labels.length; j++) {
-          const li = labels[i], lj = labels[j];
-          const cxI = canonX[i], cxJ = canonX[j];
-          // Horizontal overlap using canonical positions
-          if (cxI + li.boxW <= cxJ + GAP) continue;
-          if (cxJ + lj.boxW <= cxI + GAP) continue;
-          // Vertical overlap
-          if (li.boxY + li.boxH + GAP <= lj.boxY) continue;
-          if (lj.boxY + lj.boxH + GAP <= li.boxY) continue;
-          // Push lower-score label down
-          if (lj.score >= li.score) {
-            lj.boxY = li.boxY + li.boxH + GAP;
-          } else {
-            li.boxY = lj.boxY + lj.boxH + GAP;
-          }
-          changed = true;
-        }
-      }
+    if (labels.length === 0) {
+      _labelBounds = [];
+      _labelPositions = [];
+      return;
     }
 
-    // Final clamp: ensure all labels are within canvas bounds.
-    for (const l of labels) {
-      l.boxX = Math.max(canvasBounds.left, Math.min(l.boxX, canvasBounds.right - l.boxW));
-      l.boxY = Math.max(canvasBounds.top, Math.min(l.boxY, canvasBounds.bottom - l.boxH));
+    const centers = placeLabels(areaBounds, allX, allY, allW, allH);
+
+    for (let i = 0; i < labels.length; i++) {
+      const ai = labelIndices[i];
+      labels[i].boxX = centers[ai][0] - allW[ai] / 2;
+      labels[i].boxY = centers[ai][1] - allH[ai] / 2;
+      labels[i].boxW = allW[ai];
+      labels[i].boxH = allH[ai];
     }
 
-    _labelBounds = labels.map((l) => ({ x: l.boxX, y: l.boxY, w: l.boxW, h: l.boxH, idx: l.idx }));
+    _labelBounds = labels.map(l => ({ x: l.boxX, y: l.boxY, w: l.boxW, h: l.boxH, idx: l.idx }));
     _labelPositions = labels;
   },
 
