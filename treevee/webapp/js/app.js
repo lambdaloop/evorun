@@ -119,78 +119,21 @@ function renderAll() {
   renderIterations();
 }
 
-// File input handling
-function initFileInput() {
-  const fileInput = document.getElementById('file-input');
-  const browseBtn = document.getElementById('browse-btn');
-  const dropZone = document.getElementById('file-drop-zone');
-
-  browseBtn.addEventListener('click', () => fileInput.click());
-
-  fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) handleFile(file);
-  });
-
-  // Drag and drop
-  dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('drag-over');
-  });
-
-  dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('drag-over');
-  });
-
-  dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  });
-
-  // Also allow drop on the whole body
-  document.body.addEventListener('dragover', (e) => e.preventDefault());
-  document.body.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file && file.name.endsWith('.json')) handleFile(file);
-  });
-}
-
-async function handleFile(file) {
-  try {
-    await StateLoader.load(file);
-    document.getElementById('dashboard').style.display = 'block';
-    document.getElementById('file-drop-zone').style.display = 'none';
-    renderAll();
-  } catch (err) {
-    alert(`Error loading file: ${err.message}`);
-  }
-}
-
-// Auto-load from server API
-async function autoLoadFromServer() {
-  try {
-    const resp = await fetch('/api/state');
-    if (!resp.ok) return false;
-    const data = await resp.json();
-    StateLoader.loadFromData(data);
-    document.getElementById('dashboard').style.display = 'block';
-    document.getElementById('file-drop-zone').style.display = 'none';
-    renderAll();
-    return true;
-  } catch (err) {
-    console.warn('Auto-load failed:', err);
-    return false;
-  }
+async function loadFromServer() {
+  const resp = await fetch('/api/state');
+  if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+  const data = await resp.json();
+  StateLoader.loadFromData(data);
+  document.getElementById('dashboard').style.display = 'block';
+  renderAll();
 }
 
 // Initialize
 (async () => {
-  const loaded = await autoLoadFromServer();
-  if (!loaded) {
-    initFileInput();
+  try {
+    await loadFromServer();
+  } catch (err) {
+    console.error('Failed to load state:', err);
   }
   initTreeControls();
   initDiffClose();
