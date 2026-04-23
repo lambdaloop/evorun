@@ -965,9 +965,16 @@ class EvoRunAgent:
         elif result.had_error:
             debug_instructions.append("**Issue**: Evaluation failed with error")
             debug_instructions.append("**Action**: Fix the error based on the traceback below")
+            debug_instructions.append("**Suggestions**:")
+            debug_instructions.append("- Find the last line of the traceback to identify the exception type and location")
+            debug_instructions.append("- Common causes: missing imports, wrong variable names, shape mismatches, type errors")
+            debug_instructions.append("- Check recently modified code first")
         elif result.exit_code != 0:
             debug_instructions.append(f"**Issue**: Evaluation exited with code {result.exit_code}")
             debug_instructions.append("**Action**: Check the error output and fix the issue")
+            debug_instructions.append("**Suggestions**:")
+            debug_instructions.append("- Look for assertion failures, sys.exit() calls, or unhandled exceptions")
+            debug_instructions.append("- Check recently modified code first")
 
         if result.output:
             debug_instructions.append("\n### Error Output\n")
@@ -996,8 +1003,9 @@ class EvoRunAgent:
 
         # Check for data leakage patterns
         leakage_patterns = [
-            (r"test[_.]data", "Potential data leakage: test data reference"),
-            (r"validation[_.]data", "Potential data leakage: validation data reference"),
+            (r"\.fit\(.*test[_.]data", "Potential data leakage: test data used in fit()"),
+            (r"\.train\(.*test[_.]data", "Potential data leakage: test data used in train()"),
+            (r"\.fit\(.*validation[_.]data", "Potential data leakage: validation data used in fit()"),
             (r"shuffle\(.*seed", "Potential data leakage: shuffled with fixed seed"),
         ]
 
@@ -1010,10 +1018,6 @@ class EvoRunAgent:
             review_notes.append("Warning: Hardcoded score value detected")
         if re.search(r"target\s*=\s*\d+\.\d+", code):
             review_notes.append("Warning: Hardcoded target value detected")
-
-        # Check for missing error handling
-        if "try:" not in code and "except" not in code:
-            review_notes.append("Warning: No error handling detected")
 
         needs_fix = len(review_notes) > 0
         return needs_fix, "\n".join(review_notes)
@@ -1032,12 +1036,22 @@ class EvoRunAgent:
             (planner_input_prompt, plan_text) — full prompt sent and output received.
         """
         planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
-        web_search_instruction = (
-            "5. You may use the WebSearch tool to look up relevant papers, techniques, "
-            "or benchmarks before planning."
-            if self.enable_web_search
-            else ""
-        )
+        if self.enable_web_search:
+            detail_rule = (
+                "5. Include concrete details: if your plan references a specific algorithm,\n"
+                "   formula, technique, or API, include the mathematical formula, key parameter\n"
+                "   values, or a one-sentence description of the algorithm steps. The editor\n"
+                "   cannot look up or guess implementation details from a name alone.\n"
+                "6. Use the WebSearch tool to look up precise formulas, API documentation,\n"
+                "   or relevant techniques before planning."
+            )
+        else:
+            detail_rule = (
+                "5. Include concrete details: if your plan references a specific algorithm,\n"
+                "   formula, technique, or API, include the mathematical formula, key parameter\n"
+                "   values, or a one-sentence description of the algorithm steps. The editor\n"
+                "   cannot look up or guess implementation details from a name alone."
+            )
         planner_prompt = f"""\
 You are a code planning architect. Your job is to analyze evaluation results
 and produce a focused plan for what changes to make.
@@ -1047,12 +1061,7 @@ IMPORTANT RULES:
 2. Do NOT produce diffs or file content.
 3. Describe changes in plain language — the editor will implement them.
 4. Use the Read tool to inspect the specific files relevant to your plan.
-5. Include concrete details: if your plan references a specific algorithm,
-   formula, technique, or API, include the actual definition, parameters,
-   or pseudocode. The editor cannot look up or guess implementation details
-   from a name alone. Use the WebSearch tool to find precise formulas or
-   API documentation when needed.
-{web_search_instruction}
+{detail_rule}
 
 ## Plan Structure (keep it concise)
 
@@ -1109,14 +1118,34 @@ Produce a concise plan following this structure.
             (editor_input_prompt, cli_output) — full prompt sent and output received.
         """
         editor_env = _build_claude_env(self.editor_provider, self.editor_model, self.editor_api_key)
+        # Build a brief score context instead of repeating the full feedback
+        # (the plan already incorporates the planner's full analysis).
+        score_summary_parts = []
+        # Extract just the score line and description from feedback
+        for line in feedback.splitlines():
+            if line.startswith("**Score**:") or line.startswith("Current score:"):
+                score_summary_parts.append(line)
+            elif line.startswith("**Description**:"):
+                score_summary_parts.append(line)
+            elif line.startswith("Previous score:"):
+                score_summary_parts.append(line)
+        score_summary = "\n".join(score_summary_parts) if score_summary_parts else "(see plan for context)"
+
+        # Build modifiable file list
+        mod_files = self.codebase.get_experiment_files()
+        file_list = "\n".join(f"- {f}" for f in mod_files) if mod_files else "- (any files in experiment/)"
         editor_prompt = f"""\
 You are a senior Python developer implementing a code improvement plan.
 
-## Context (from evaluation)
-{feedback}
+## Score Context
+{score_summary}
 
 ## Your Plan
 {plan}
+
+## Modifiable Files
+{file_list}
+Do NOT modify eval.py, evaluation.py, or external test harnesses.
 
 ## Instructions
 1. Read the files mentioned in the plan to understand the current code.
@@ -1125,7 +1154,7 @@ You are a senior Python developer implementing a code improvement plan.
 4. Preserve working code that is not mentioned in the plan.
 5. Use Edit tool for targeted changes where possible.
 6. Do NOT make changes beyond what the plan specifies.
-7. Focus on improving the evaluation score.
+7. After editing, re-read each modified file to verify syntax and imports are correct.
 """
 
         try:
@@ -1149,6 +1178,38 @@ You are a senior Python developer implementing a code improvement plan.
             _run_logger.warning(f"Editor failed (iter {self._iteration}): {e}")
             return (editor_prompt, "")
 
+    @staticmethod
+    def _format_error_context(result: EvalResult) -> str:
+        """Build a shared error context string from an eval result.
+
+        Used by both error planner and error editor to ensure consistent
+        error presentation.
+        """
+        parts = []
+        if result.timed_out:
+            parts.append("**Issue**: Evaluation timed out")
+            parts.append("**Action**: Check for infinite loops, expensive operations, or blocking I/O")
+        elif result.had_error:
+            parts.append("**Issue**: Evaluation failed with error")
+        elif result.exit_code is not None and result.exit_code != 0:
+            parts.append(f"**Issue**: Evaluation exited with code {result.exit_code}")
+            parts.append("**Action**: Check the error output and fix the issue")
+        else:
+            parts.append("**Issue**: Evaluation completed but score could not be parsed")
+            parts.append("**Action**: Check the eval output below and fix whatever is preventing the evaluation from completing successfully.")
+
+        if result.output:
+            full_output = "\n".join(str(line) for line in result.output)
+            last_3000 = full_output[-3000:] if len(full_output) > 3000 else full_output
+            parts.append("\n### Eval Output\n")
+            parts.append("```")
+            parts.append(last_3000)
+            parts.append("```")
+        else:
+            parts.append("\n### Eval Output\n(none — the eval command produced no stdout/stderr)")
+
+        return "\n".join(parts)
+
     def _run_error_planner(self, result: EvalResult) -> tuple[str, str]:
         """Analyze evaluation errors and produce a fix plan.
 
@@ -1161,36 +1222,17 @@ You are a senior Python developer implementing a code improvement plan.
         Returns:
             (planner_input_prompt, fix_plan) — full prompt sent and output received.
         """
-        error_context = []
-        if result.timed_out:
-            error_context.append("**Issue**: Evaluation timed out")
-            error_context.append("**Action**: Check for infinite loops, expensive operations, or blocking I/O")
-        elif result.had_error:
-            error_context.append("**Issue**: Evaluation failed with error")
-        elif result.exit_code is not None and result.exit_code != 0:
-            error_context.append(f"**Issue**: Evaluation exited with code {result.exit_code}")
-            error_context.append("**Action**: Check the error output and fix the issue")
-        else:
-            error_context.append("**Issue**: Evaluation completed but score could not be parsed")
-            error_context.append("**Action**: Check the eval output below and fix whatever is preventing the evaluation from completing successfully.")
-
-        if result.output:
-            full_output = "\n".join(str(line) for line in result.output)
-            last_3000 = full_output[-3000:] if len(full_output) > 3000 else full_output
-            error_context.append("\n### Eval Output\n")
-            error_context.append("```")
-            error_context.append(last_3000)
-            error_context.append("```")
-        else:
-            error_context.append("\n### Eval Output\n(none — the eval command produced no stdout/stderr)")
-
-        error_text = "\n".join(error_context)
+        error_text = self._format_error_context(result)
 
         planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
         task_section = (
             f"## Task\n{self.codebase._task_content}\n\n"
             if self.codebase._task_content else ""
         )
+        # Include recently changed files so the error planner can correlate
+        file_change_lines = self._format_file_changes()
+        file_change_section = "\n".join(file_change_lines) + "\n\n" if file_change_lines else ""
+
         planner_prompt = f"""\
 You are a code planning architect. Your job is to analyze evaluation errors
 and produce a plan for what changes to make to fix them.
@@ -1200,12 +1242,13 @@ IMPORTANT RULES:
 2. Do NOT produce diffs or file content.
 3. Describe changes in plain language — the editor will implement them.
 4. Use the Read tool to read the files implicated by the error before planning.
+5. Prefer the smallest change that fixes the error. Do not refactor or improve unrelated code.
 
-{task_section}## Error
+{task_section}{file_change_section}## Error
 {error_text}
 
 ## Instructions
-1. Read the files most likely involved in the error.
+1. Read the files most likely involved in the error (start with recently changed files).
 2. Identify the root cause of the failure.
 3. List the specific files and code sections that need to be changed.
 4. Describe what each change should accomplish.
@@ -1246,30 +1289,7 @@ Produce a concise fix plan following this structure.
         Returns:
             (editor_input_prompt, cli_output) — full prompt sent and output received.
         """
-        error_context = []
-        if result.timed_out:
-            error_context.append("**Issue**: Evaluation timed out")
-            error_context.append("**Action**: Check for infinite loops, expensive operations, or blocking I/O")
-        elif result.had_error:
-            error_context.append("**Issue**: Evaluation failed with error")
-        elif result.exit_code is not None and result.exit_code != 0:
-            error_context.append(f"**Issue**: Evaluation exited with code {result.exit_code}")
-            error_context.append("**Action**: Check the error output and fix the issue")
-        else:
-            error_context.append("**Issue**: Evaluation completed but score could not be parsed")
-            error_context.append("**Action**: Check the eval output below and fix whatever is preventing the evaluation from completing successfully.")
-
-        if result.output:
-            full_output = "\n".join(str(line) for line in result.output)
-            last_3000 = full_output[-3000:] if len(full_output) > 3000 else full_output
-            error_context.append("\n### Eval Output\n")
-            error_context.append("```")
-            error_context.append(last_3000)
-            error_context.append("```")
-        else:
-            error_context.append("\n### Eval Output\n(none — the eval command produced no stdout/stderr)")
-
-        error_text = "\n".join(error_context)
+        error_text = self._format_error_context(result)
 
         editor_prompt = f"""\
 You are a senior Python developer fixing errors in the codebase.
@@ -2349,6 +2369,7 @@ Do not try to improve the score — just fix the errors.
                     "Summarise the following code diff in exactly ONE line. "
                     "Focus on what was changed (files, functions, strategies). "
                     f"Do NOT include code snippets. Keep it under {MAX_EDIT_SUMMARY_CHARS} characters.\n\n"
+                    'Example: "Updated fit() in model.py to use Ridge regression with alpha=0.1 instead of OLS"\n\n'
                     f"Diff:\n{diff_text}\n\nSummary:"
                 )
                 editor_env = _build_claude_env(self.editor_provider, self.editor_model, self.editor_api_key)
@@ -2467,62 +2488,77 @@ Do not try to improve the score — just fix the errors.
         Returns:
             Feedback message string (never None).
         """
+        is_broken = result.score is None
         parts: list[str] = [f"### Iteration {iteration}/{self.max_iters}"]
 
-        # --- Debug instructions (if available) ---
-        if debug_instructions:
-            parts.extend([debug_instructions, ""])
+        if is_broken:
+            # Broken path: prioritize debug/error info, skip improvement directive
+            if debug_instructions:
+                parts.extend([debug_instructions, ""])
 
-        # --- Code review notes (if available) ---
-        if code_review_notes:
-            parts.extend([code_review_notes, ""])
+            result_lines = self._format_result_info(result)
+            if result_lines:
+                parts.extend(result_lines)
 
-        # --- Clear improvement directive ---
-        directive_lines = self._build_improvement_directive(result, iteration, parent_score)
-        if directive_lines:
-            parts.extend(directive_lines)
-            parts.append("")
+            prev_eval_lines = self._format_prev_eval(prev_eval)
+            if prev_eval_lines:
+                parts.extend(prev_eval_lines)
 
-        # --- Scoring breakdown (included when score + description exist) ---
-        if result.score is not None and result.description:
-            parsed_metrics = self._parse_eval_description(result.description)
-            if parsed_metrics:
-                breakdown_lines = self._build_score_breakdown(parsed_metrics)
-                if breakdown_lines:
-                    parts.append("## Scoring breakdown")
-                    parts.extend(breakdown_lines)
-                    suggestions = self._build_improvement_suggestions(
-                        parsed_metrics, result.description,
-                    )
-                    if suggestions:
-                        parts.append("## Suggested improvements")
-                        parts.extend(suggestions)
+            file_changes = self._format_file_changes()
+            if file_changes:
+                parts.extend(file_changes)
 
-        # --- File changes from this iteration ---
-        file_changes = self._format_file_changes()
-        if file_changes:
-            parts.extend(file_changes)
+            if code_review_notes:
+                parts.extend([code_review_notes, ""])
+        else:
+            # Working path: lead with the improvement directive
+            directive_lines = self._build_improvement_directive(result, iteration, parent_score)
+            if directive_lines:
+                parts.extend(directive_lines)
+                parts.append("")
 
-        # --- Task-specific hints ---
-        task_tips = self._build_task_context(self.codebase._task_content)
-        if task_tips:
-            parts.append("## From TASK.md")
-            parts.extend(task_tips)
+            if result.score is not None and result.description:
+                parsed_metrics = self._parse_eval_description(result.description)
+                if parsed_metrics:
+                    breakdown_lines = self._build_score_breakdown(parsed_metrics)
+                    if breakdown_lines:
+                        parts.append("## Scoring breakdown")
+                        parts.extend(breakdown_lines)
+                        suggestions = self._build_improvement_suggestions(
+                            parsed_metrics, result.description,
+                        )
+                        if suggestions:
+                            parts.append("## Suggested improvements")
+                            parts.extend(suggestions)
 
-        # --- Tree search feedback ---
-        tree_lines = self._format_tree_context(tree_info)
-        if tree_lines:
-            parts.extend(tree_lines)
+            if code_review_notes:
+                parts.extend([code_review_notes, ""])
 
-        # --- Previous eval output for debugging ---
-        prev_eval_lines = self._format_prev_eval(prev_eval)
-        if prev_eval_lines:
-            parts.extend(prev_eval_lines)
+            file_changes = self._format_file_changes()
+            if file_changes:
+                parts.extend(file_changes)
 
-        # --- Result info (timeout / score / error / speed warnings) ---
-        result_lines = self._format_result_info(result)
-        if result_lines:
-            parts.extend(result_lines)
+            task_tips = self._build_task_context(self.codebase._task_content)
+            if task_tips:
+                parts.append("## From TASK.md")
+                parts.extend(task_tips)
+
+            tree_lines = self._format_tree_context(tree_info)
+            if tree_lines:
+                parts.extend(tree_lines)
+
+            prev_eval_lines = self._format_prev_eval(prev_eval)
+            if prev_eval_lines:
+                parts.extend(prev_eval_lines)
+
+            result_lines = self._format_result_info(result)
+            if result_lines:
+                parts.extend(result_lines)
+
+        # --- What was tried (anti-repetition) ---
+        tried_lines = self._format_previous_attempts()
+        if tried_lines:
+            parts.extend(tried_lines)
 
         # --- History summary ---
         history_lines = self._format_history_summary()
@@ -2643,8 +2679,6 @@ Do not try to improve the score — just fix the errors.
             if self.codebase._task_content else ""
         )
         fusion_feedback = f"""\
-### Cross-Branch Fusion Context
-
 You are a code planning architect for cross-branch fusion. Analyze the
 reference diffs below and plan how to selectively incorporate useful
 techniques into the current codebase.
@@ -2686,10 +2720,11 @@ One well-integrated technique is better than a messy combination of several.
 **Eval Output**:
 {target_eval if target_eval else '(none)'}
 
-## Reference Diffs
+<reference_diffs>
 {''.join(reference_sections)}
+</reference_diffs>
 
-Produce a concise fusion plan following this structure.
+Produce a concise fusion plan following the Required Analysis structure above.
 """
         fusion_plan = ""
         fusion_planner_input = fusion_feedback
@@ -2720,27 +2755,25 @@ Produce a concise fusion plan following this structure.
             fusion_editor_input = f"""\
 You are implementing a cross-branch fusion plan.
 
-## Fusion Plan
-{fusion_plan}
-
-## Reference Diffs (for context while reading)
-{''.join(reference_sections)}
-
 ## Instructions
 1. Read the current files to understand the codebase.
-2. Implement the fusion plan: selectively adopt techniques shown in the
-   reference diffs that fit your current architecture.
+2. Implement the fusion plan below: selectively adopt techniques that fit
+   your current architecture.
 3. Preserve what is working in your current solution.
 4. Do NOT blindly combine everything — choose the most relevant technique(s).
 5. Use Edit tool for targeted changes where possible.
+6. Verify the adopted technique is compatible with existing variable names and function signatures.
+7. After editing, re-read each modified file to verify syntax and imports are correct.
 
 Focus on quality over quantity: one well-integrated technique is better than
 a messy combination of several.
 
-## Integration Checklist
-- Verify the adopted technique is compatible with existing variable names and function signatures
-- Ensure the technique addresses a real limitation, not just copied from the diff for variety
-- Preserve the current solution's strengths that are not mentioned in the fusion plan
+## Fusion Plan
+{fusion_plan}
+
+<reference_diffs>
+{''.join(reference_sections)}
+</reference_diffs>
 """
             try:
                 log_content = _run_claude_cli_with_env(
@@ -2859,10 +2892,24 @@ a messy combination of several.
         return [
             "## Previous eval output (from last expansion of this node)",
             f"```\n{prev_eval.strip()[-MAX_PREV_EVAL_CHARS:]}\n```",
-            "### IMPORTANT: This is the eval output from the code in "
-            "this tree node. Study the error carefully and adjust the "
-            "code to fix it.",
         ]
+
+    def _format_previous_attempts(self) -> list[str]:
+        """Format a summary of what was tried in recent iterations to prevent repetition.
+
+        Returns:
+            List of lines, or empty list if no relevant history.
+        """
+        if not self.history:
+            return []
+        recent = [e for e in self.history[-5:] if e.edit_summary]
+        if not recent:
+            return []
+        lines = ["## Previously tried approaches (do NOT repeat these)"]
+        for entry in recent:
+            score_str = f"score={entry.score:.4f}" if entry.score is not None else "broken"
+            lines.append(f"- Iter {entry.iter} ({score_str}): {entry.edit_summary}")
+        return lines
 
     def _format_result_info(self, result: EvalResult) -> list[str]:
         """Format result information (timeout, score, error, speed warnings).
@@ -3179,13 +3226,15 @@ a messy combination of several.
                 if not self.tree.maximize and direction == "high":
                     norm = 1.0 - norm
 
+                filled = min(10, int(norm * 10))
+                bar = "#" * filled + "." * (10 - filled)
                 if norm >= 0.8:
-                    bar = "🟩" * min(10, int(norm * 10))
+                    label = "good"
                 elif norm >= 0.4:
-                    bar = "🟨" * min(10, int(norm * 10))
+                    label = "needs work"
                 else:
-                    bar = "⬜" * max(1, min(10, int(norm * 10)))
-                parts.append(f"- {name}: {value:.4f} (bar: [{bar}])")
+                    label = "poor"
+                parts.append(f"- {name}: {value:.4f} [{bar}] ({label})")
             else:
                 parts.append(f"- {name}: {value:.4f}")
         return parts
