@@ -3699,9 +3699,10 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
         help="Probability of using fusion after fusion_min_iters (default: 0.5)",
     )
     subparser.add_argument(
-        "--server",
-        action="store_true",
-        help="Start the web visualization server alongside the treevee run",
+        "--no-server",
+        action="store_false",
+        dest="server",
+        help="Disable the web visualization server (server is enabled by default)",
     )
     subparser.add_argument(
         "--port",
