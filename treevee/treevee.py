@@ -318,12 +318,12 @@ class CodebaseManager:
     """Handles backup and restoration of the experiment directory.
 
     Backs up experiment/, TASK.md, eval.py, and pixi.toml by explicitly
-    copying each to .treevee_backup. Restores everything on demand.
+    copying each to .treevee/backup. Restores everything on demand.
     Snapshots additionally handle checkpointing at best scores.
 
     Directories Created:
-        .treevee_backup/        — experiment/ + TASK.md + eval.py + pixi.toml
-        .treevee_snapshots/     — per-node snapshots at best scores
+        .treevee/backup/        — experiment/ + TASK.md + eval.py + pixi.toml
+        .treevee/snapshots/     — per-node snapshots at best scores
 
     Args:
         codebase_dir: Path to the directory containing the codebase experiment.
@@ -338,7 +338,7 @@ class CodebaseManager:
             task_file: Name of the task spec file to load for LLM context.
         """
         self.codebase_dir = Path(codebase_dir).resolve()
-        self.backup_dir = self.codebase_dir / ".treevee_backup"
+        self.backup_dir = self.codebase_dir / ".treevee" / "backup"
         self._task_file: Path | None = None
         self._task_content: str | None = None
         self._task_filename = task_file
@@ -642,8 +642,8 @@ class EvoRunAgent:
             "Edit(./experiment/**)",
         ],
         "deny": [
-             "Read(./.treevee*)",
-             "Edit(./.treevee*)",
+             "Read(./.treevee/**)",
+             "Edit(./.treevee/**)",
         ],
     }
 
@@ -709,7 +709,8 @@ class EvoRunAgent:
         self._parent_stagnation: dict[str, int] = {}
 
         # State and resume
-        self.state_path = self.codebase.codebase_dir / ".treevee_state.json"
+        self.state_path = self.codebase.codebase_dir / ".treevee" / "state.json"
+        self.state_path.parent.mkdir(exist_ok=True)
         self._resumed = False
         self._history_start: int = 0
 
@@ -727,7 +728,7 @@ class EvoRunAgent:
         # Solution deduplication
         self._seen_code_hashes: set[str] = set()
 
-        # Ensure .claude/settings.local.json blocks reads of .treevee* files
+        # Ensure .claude/settings.local.json blocks reads of .treevee/ files
         self._ensure_claude_settings()
 
         # Start the wall-clock timer.
@@ -749,7 +750,7 @@ class EvoRunAgent:
 
         Rules:
         - Allow Edit of experiment/ (auto-approve, sandbox LLM to one folder)
-        - Deny Read/Edit of .treevee* files (protect internal state, snapshots, logs)
+        - Deny Read/Edit of .treevee/ files (protect internal state, snapshots, logs)
         - All other reads are unrestricted (normal Claude Code behavior)
         """
         settings_path = self.codebase.codebase_dir / ".claude" / "settings.local.json"
@@ -1075,7 +1076,7 @@ Produce a concise plan following this structure.
                 env_overrides=planner_env,
                 max_turns=30,
                 allowed_tools=['Read'],
-                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
@@ -1129,7 +1130,7 @@ You are a senior Python developer implementing a code improvement plan.
                 env_overrides=editor_env,
                 max_turns=500,
                 allowed_tools=['Read', 'Edit', 'Write'],
-                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
@@ -1213,7 +1214,7 @@ Produce a concise fix plan following this structure.
                 env_overrides=planner_env,
                 max_turns=30,
                 allowed_tools=['Read'],
-                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
@@ -1292,7 +1293,7 @@ Do not try to improve the score — just fix the errors.
                 env_overrides=editor_env,
                 max_turns=500,
                 allowed_tools=['Read', 'Edit', 'Write'],
-                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
@@ -1688,7 +1689,7 @@ Do not try to improve the score — just fix the errors.
                 if self._consecutive_no_changes >= MAX_CONSECUTIVE_NO_CHANGES:
                     _run_logger.warning(
                         f"[Claude] No changes for {self._consecutive_no_changes} "
-                        f"consecutive iterations. Check .treevee_planner_output for debug info."
+                        f"consecutive iterations. Check .treevee/planner_output for debug info."
                     )
             # Store for next iteration's feedback.
             self._last_modified_files = modified_files
@@ -1888,9 +1889,9 @@ Do not try to improve the score — just fix the errors.
 
         # Rename pre-snapshot to child's actual snapshot name.
         if pre_snap_dir:
-            old_name = self.codebase.codebase_dir / ".treevee_snapshots" / pre_snap_dir
+            old_name = self.codebase.codebase_dir / ".treevee/snapshots" / pre_snap_dir
             new_name = (
-                self.codebase.codebase_dir / ".treevee_snapshots"
+                self.codebase.codebase_dir / ".treevee/snapshots"
                 / f"iter_snapshot_{child_node.id[:8]}"
             )
             if old_name.exists() and not new_name.exists():
@@ -2053,7 +2054,7 @@ Do not try to improve the score — just fix the errors.
     def save_state(self) -> None:
         """Save the current optimization state to disk.
 
-        Writes the following to .treevee_state.json:
+        Writes the following to .treevee/state.json:
             - next_iteration
             - best_score, best_snapshot_iteration
             - consecutive_timeouts
@@ -2128,7 +2129,7 @@ Do not try to improve the score — just fix the errors.
         else:
             target_name = f"iter_snapshot_{node.id[:8]}"
         snapshot_dir = (
-            self.codebase.codebase_dir / ".treevee_snapshots" / target_name
+            self.codebase.codebase_dir / ".treevee/snapshots" / target_name
         )
 
         # Collect files that exist in the parent snapshot (if any).
@@ -2197,7 +2198,7 @@ Do not try to improve the score — just fix the errors.
         Returns:
             Path string if found, None otherwise.
         """
-        snaps = self.codebase.codebase_dir / ".treevee_snapshots"
+        snaps = self.codebase.codebase_dir / ".treevee/snapshots"
         named = snaps / f"iter_snapshot_{node.id[:8]}"
         if named.exists():
             return str(named)
@@ -2379,7 +2380,7 @@ Do not try to improve the score — just fix the errors.
         if not snapshot_dir.exists():
             snapshot_dir = (
                 self.codebase.codebase_dir
-                / ".treevee_snapshots"
+                / ".treevee/snapshots"
                 / snapshot_name
             )
 
@@ -2391,7 +2392,7 @@ Do not try to improve the score — just fix the errors.
         try:
             resolved = snapshot_dir.resolve()
             allowed_base = (
-                self.codebase.codebase_dir / ".treevee_snapshots"
+                self.codebase.codebase_dir / ".treevee/snapshots"
             ).resolve()
             if not str(resolved).startswith(str(allowed_base)):
                 _run_logger.error(
@@ -2692,7 +2693,7 @@ Produce a concise fusion plan following this structure.
                 env_overrides=fusion_planner_env,
                 max_turns=30,
                 allowed_tools=['Read'],
-                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=2,
                 retry_base_delay=3.0,
                 stage="planner",
@@ -2740,7 +2741,7 @@ a messy combination of several.
                     env_overrides=fusion_editor_env,
                     max_turns=500,
                     allowed_tools=['Read', 'Edit', 'Write'],
-                    log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
+                    log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                     retries=2,
                     retry_base_delay=3.0,
                     stage="editor",
@@ -3787,7 +3788,7 @@ def _validate_run_args(args: argparse.Namespace) -> None:
         )
 
     if not args.reset and codebase_dir.exists():
-        state_path = codebase_dir / ".treevee_state.json"
+        state_path = codebase_dir / ".treevee/state.json"
         if state_path.exists():
             _run_logger.info(f"Found state file: {state_path} — resuming.")
 
@@ -3849,23 +3850,12 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
     codebase_root = Path(args.path)
 
-    # --reset: delete all .treevee artifacts before starting.
+    # --reset: delete the .treevee folder before starting.
     if args.reset:
-        _treevee_artifacts = [
-            ".treevee_state.json",
-            ".treevee_backup",
-            ".treevee_snapshots",
-            ".treevee_planner_output",
-        ]
-        for name in _treevee_artifacts:
-            p = codebase_root / name
-            if p.exists():
-                if p.is_dir():
-                    shutil.rmtree(p)
-                    _run_logger.info(f"[Reset] Deleted directory: {p}")
-                else:
-                    p.unlink()
-                    _run_logger.info(f"[Reset] Deleted file: {p}")
+        p = codebase_root / ".treevee"
+        if p.exists():
+            shutil.rmtree(p)
+            _run_logger.info(f"[Reset] Deleted: {p}")
 
     # Optionally start the web visualization server in a background thread.
     _server = None
@@ -4005,7 +3995,7 @@ def _restore_snapshot(codebase_dir: Path, snapshot_name: str) -> None:
 
     # Resolve relative names against the codebase snapshots directory.
     if not snapshot_dir.exists():
-        snapshot_dir = codebase_dir / ".treevee_snapshots" / snapshot_name
+        snapshot_dir = codebase_dir / ".treevee/snapshots" / snapshot_name
 
     if not snapshot_dir.exists():
         _run_logger.info(f"[Restore] Snapshot not found: {snapshot_name}")
@@ -4014,7 +4004,7 @@ def _restore_snapshot(codebase_dir: Path, snapshot_name: str) -> None:
     # Security: reject any resolved path that escapes the snapshot dir.
     try:
         resolved = snapshot_dir.resolve()
-        allowed_base = (codebase_dir / ".treevee_snapshots").resolve()
+        allowed_base = (codebase_dir / ".treevee/snapshots").resolve()
         if not str(resolved).startswith(str(allowed_base)):
             _run_logger.error(f"[Restore] Snapshot path escapes codebase: {snapshot_name}")
             return
@@ -4054,7 +4044,7 @@ def _restore_snapshot(codebase_dir: Path, snapshot_name: str) -> None:
 def _cmd_restore(args: argparse.Namespace) -> None:
     """Restore the codebase from a saved snapshot."""
     codebase_dir = Path(args.path)
-    state_path = codebase_dir / ".treevee_state.json"
+    state_path = codebase_dir / ".treevee/state.json"
 
     if not state_path.exists():
         _run_logger.error(f"No state file found at: {state_path}")
@@ -4075,12 +4065,12 @@ def _cmd_restore(args: argparse.Namespace) -> None:
     def resolve_snapshot(node_id: str) -> str:
         """Return the best available snapshot name for a node ID."""
         named = f"iter_snapshot_{node_id[:8]}"
-        if (codebase_dir / ".treevee_snapshots" / named).exists():
+        if (codebase_dir / ".treevee/snapshots" / named).exists():
             return named
         node = nodes_by_id.get(node_id)
         if node is not None:
             pre = f"iter_snapshot_pre_{node['step']}"
-            if (codebase_dir / ".treevee_snapshots" / pre).exists():
+            if (codebase_dir / ".treevee/snapshots" / pre).exists():
                 return pre
         return named  # let _restore_snapshot emit the not-found message
 
@@ -4118,7 +4108,7 @@ def _cmd_restore(args: argparse.Namespace) -> None:
 def _cmd_history(args: argparse.Namespace) -> None:
     """Print iterations in chronological order with scores and edit summaries."""
     codebase_dir = Path(args.path)
-    state_path = codebase_dir / ".treevee_state.json"
+    state_path = codebase_dir / ".treevee/state.json"
 
     if not state_path.exists():
         _run_logger.error(f"No state file found at: {state_path}")
@@ -4161,7 +4151,7 @@ def _cmd_history(args: argparse.Namespace) -> None:
 def _cmd_tree(args: argparse.Namespace) -> None:
     """Print a tree summary of the run to stdout."""
     codebase_dir = Path(args.path)
-    state_path = codebase_dir / ".treevee_state.json"
+    state_path = codebase_dir / ".treevee/state.json"
 
     if not state_path.exists():
         _run_logger.error(f"No state file found at: {state_path}")

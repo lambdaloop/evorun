@@ -99,8 +99,4 @@ simple_run_plan.md
 experiment.bak
 
 # ===== Treevee Runtime (examples) =====
-.treevee_aider.log
-.treevee_state.json
-.treevee_backup/
-.treevee_snapshots/
-.treevee_memory/
+.treevee/
