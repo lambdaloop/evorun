@@ -424,8 +424,8 @@ function showNodeDetailToBottom(nodeData) {
   html += '<h4 style="color:var(--accent-lavender);font-size:13px;margin:0;">Code Diff</h4>';
   if (!isRoot) {
     const btnBase = 'border:1px solid var(--border-color);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;';
-    html += `<button id="diff-toggle-parent" style="${btnBase}background:var(--accent-lavender);color:var(--bg-primary);">vs parent</button>`;
-    html += `<button id="diff-toggle-root" style="${btnBase}background:var(--bg-tertiary);color:var(--accent-lavender);">vs root</button>`;
+    html += `<button id="diff-toggle-parent" class="active" style="${btnBase}background:var(--accent-lavender);color:var(--bg-primary);">vs parent</button>`;
+    html += `<button id="diff-toggle-root" class="inactive" style="${btnBase}background:var(--bg-tertiary);color:var(--accent-lavender);">vs root</button>`;
   }
   html += '</div>';
   html += '<div id="diff-content">';
@@ -549,12 +549,15 @@ function showNodeDetailToBottom(nodeData) {
   const toggleRoot = diffOutput.querySelector('#diff-toggle-root');
   if (toggleParent && toggleRoot) {
     const diffContent = diffOutput.querySelector('#diff-content');
-    const activeBtnStyle = 'background:var(--accent-lavender);color:var(--bg-primary);';
-    const inactiveBtnStyle = 'background:var(--bg-tertiary);color:var(--accent-lavender);';
+    function setActive(activeBtn, inactiveBtn) {
+      activeBtn.classList.add('active');
+      activeBtn.classList.remove('inactive');
+      inactiveBtn.classList.add('inactive');
+      inactiveBtn.classList.remove('active');
+    }
 
     function showParentDiff() {
-      toggleParent.style.cssText = toggleParent.style.cssText.replace(/background:[^;]+;color:[^;]+;/, activeBtnStyle);
-      toggleRoot.style.cssText = toggleRoot.style.cssText.replace(/background:[^;]+;color:[^;]+;/, inactiveBtnStyle);
+      setActive(toggleParent, toggleRoot);
       if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
         diffContent.innerHTML = renderDiffHTML(historyEntry.diff_text);
       } else {
@@ -563,8 +566,7 @@ function showNodeDetailToBottom(nodeData) {
     }
 
     async function showRootDiff() {
-      toggleRoot.style.cssText = toggleRoot.style.cssText.replace(/background:[^;]+;color:[^;]+;/, activeBtnStyle);
-      toggleParent.style.cssText = toggleParent.style.cssText.replace(/background:[^;]+;color:[^;]+;/, inactiveBtnStyle);
+      setActive(toggleRoot, toggleParent);
       if (rootDiffCache[nodeData.id] !== undefined) {
         const cached = rootDiffCache[nodeData.id];
         diffContent.innerHTML = cached ? renderDiffHTML(cached) : '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No changes from root.</p>';

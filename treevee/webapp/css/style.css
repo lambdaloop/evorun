@@ -1124,6 +1124,20 @@ section h2::after {
   word-break: break-all;
 }
 
+/* ── Diff toggle buttons (vs parent / vs root) ── */
+
+#diff-toggle-parent.active,
+#diff-toggle-root.active {
+  background: var(--accent-lavender) !important;
+  color: var(--bg-primary) !important;
+}
+
+#diff-toggle-parent.inactive,
+#diff-toggle-root.inactive {
+  background: var(--bg-tertiary) !important;
+  color: var(--accent-lavender) !important;
+}
+
 /* ── Close button ── */
 
 #close-diff {
