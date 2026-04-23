@@ -1825,7 +1825,7 @@ Do not try to improve the score — just fix the errors.
             edit_summary = ""
             if self._summary_future is not None:
                 try:
-                    edit_summary = self._summary_future.result(timeout=5.0) or ""
+                    edit_summary = self._summary_future.result(timeout=60.0) or ""
                 except concurrent.futures.TimeoutError:
                     pass
                 except Exception:
