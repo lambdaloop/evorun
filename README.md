@@ -25,10 +25,12 @@ Combining LLM mutations with tree search and a concrete score function makes the
 I couldn't fully wrap my mind around MLEvolve or AIDE ML, so I made my own thing. 
 
 Some opinionated differences relative to other frameworks:
-- clear project structure
+- clear input project structure
 - planner / editor separation
-- only one solution running at a time
-- properly sandboxed 
+- only one iteration running at a time
+- properly sandboxed (see safety section)
+- using claude code as the harness
+- support various LLM APIs (see provider config below) 
 
 ## Project structure
 
@@ -49,7 +51,22 @@ You can have any other files in the `my_project` folder, the LLM will edit only 
 
 One nice structure that I use is having a separate `code/` subfolder for my codebase, and then symlink the relevant files from `experiment/` to `code/` so the structure is maintained for my project.
 
-## Examples
+## Example workflow
+
+Here is an example workflow that I've used, here specifically for the [label placement example](./examples/label_placement).
+
+1. Create a new folder
+2. Run `treevee init` within the folder to populate the structure
+3. Modify the `eval.py` script and initial `experiment` folder for your task 
+4. You can place any other files in the folder. Only files in `experiment` are modified, but other files may be read.
+5. Update the `config.toml` file to match your task design
+
+For step 3, I prompted claude code to generate a label placement evaluation task that penalizes overlap of label boxes with lines, points, and other labels, as well as penalizes clipping, distance of label from point, and inconsistent positions when canvas changes. Prompting to generate a task generally works well enough, but you may have to tune the score function a bit to make sure the weights are what you want. 
+
+5. Run `treevee run` within the folder 
+6. Marvel at the score improving over time in the webapp (default url is http://localhost:9000 )
+
+
 
 ## Commands
 
@@ -62,9 +79,29 @@ One nice structure that I use is having a separate `code/` subfolder for my code
 
 ## Safety
 
-bubblewrap
-
+Some mechanisms to prevent the LLM loop from going wild:
+- planner only has read and web search access
+- editor can only edit the experiment/ subfolder
+- neither planner nor editor can run bash scripts
+- the evaluation command is run in a sandbox using bubblewrap so it can only edit files in project folder
 
 ## Questions
 
-### 
+### Can I disable the sandbox? 
+
+I see you like to live on the wild side. Yes, you can pass `--disable-sandbox` to `treevee run` to disable the sandbox. I recommend running this in a docker container for safety in that case.
+
+### What's up with the name? 
+
+It's tree + eevee! It seemed like a cool name for an evolutionary tree algorithm search program.
+
+### How actively maintained will this be?
+
+I'm not sure yet, the project is still quite new.  
+
+### What have you used this for? 
+
+I was really happy that it could optimize the [core bundle adjustment loop in aniposelib](https://github.com/lambdaloop/aniposelib/commit/4e9cff938d7ae253443a6bf8d7ca1538108089c2) with this! 
+
+Besides that, I optimized the placement of the improvement labels in the treevee webapp graph (see header), as tuning the algorithm turned out to be harder than I thought at first.
+
