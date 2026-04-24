@@ -20,6 +20,16 @@ This is not a new idea. The treevee code leans heavily on the [MLEvolve](https:/
 
 Combining LLM mutations with tree search and a concrete score function makes them more robust to failures and allows for iterative exploration of a solution space. 
 
+## Table of Contents
+- [How it works](#how-it-works)
+- [Why treevee?](#why-treevee)
+- [Installation](#installation)
+- [Project structure](#project-structure)
+- [Example workflow](#example-workflow)
+- [Commands](#commands)
+- [Safety](#safety)
+- [Questions](#questions)
+
 ## Why treevee? 
 
 I couldn't fully wrap my mind around MLEvolve or AIDE ML, so I made my own thing. 
