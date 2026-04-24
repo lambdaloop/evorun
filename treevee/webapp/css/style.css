@@ -228,6 +228,7 @@ section:hover h2 {
   box-shadow: var(--shadow-sm);
   transition: border-color 0.25s ease, box-shadow 0.25s ease;
   position: relative;
+  overflow: hidden;
 }
 
 #tree-panel::before, #iterations-panel::before {
