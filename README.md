@@ -32,6 +32,10 @@ Some opinionated differences relative to other frameworks:
 - using claude code as the harness
 - support various LLM APIs (see provider config below) 
 
+## Installation
+
+You can install with `uv` using: `uv tool install git+https://github.com/lambdaloop/treevee/`
+
 ## Project structure
 
 ```
