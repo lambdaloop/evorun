@@ -153,6 +153,47 @@ class HistoryEntry:
 
 
 # ────────────────────────────────────────────────────────────
+# Bubblewrap sandbox helper
+# ────────────────────────────────────────────────────────────
+
+_TREEVEE_EVAL_CMD_ENV = "_TREEVEE_EVAL_CMD_ENV"
+
+
+def _build_bwrap_args(
+    eval_cmd: str,
+    codebase_dir: Path,
+    allow_network: bool = False,
+) -> tuple[list[str], dict[str, str]]:
+    """Build bubblewrap command and extra env vars for the eval command.
+
+    The eval command is passed via an environment variable to avoid shell
+    quoting issues. Inside the sandbox, 'sh -c' reads it back and executes
+    it, preserving shell semantics (word splitting, globbing) equivalent
+    to the current shell=True behavior.
+
+    Returns:
+        (command_list, extra_env) where extra_env contains the eval_cmd
+        so it can be retrieved inside the sandbox via the environment.
+    """
+    bwrap_args = [
+        "bwrap",
+        "--ro-bind", "/", "/",
+        "--bind", str(codebase_dir), str(codebase_dir),
+        "--bind", "/tmp", "/tmp",
+        "--dev", "/dev",
+        "--chdir", str(codebase_dir),
+        "--unshare-all",
+        "--die-with-parent",
+    ]
+    if not allow_network:
+        bwrap_args.append("--unshare-net")
+    bwrap_args.extend(["sh", "-c", f"exec $_TREEVEE_EVAL_CMD_ENV"])
+
+    extra_env = {_TREEVEE_EVAL_CMD_ENV: eval_cmd}
+    return bwrap_args, extra_env
+
+
+# ────────────────────────────────────────────────────────────
 # Evaluator
 # ────────────────────────────────────────────────────────────
 
@@ -186,6 +227,8 @@ class Evaluator:
         eval_cmd: str,
         eval_timeout: int,
         codebase_dir: Path = Path("."),
+        sandbox: bool = True,
+        allow_network: bool = False,
     ):
         """Initialize the evaluator.
 
@@ -193,10 +236,25 @@ class Evaluator:
             eval_cmd: Shell command to execute (e.g., "pixi run python eval.py").
             eval_timeout: Maximum execution time in seconds.
             codebase_dir: Working directory to run from (for pixi env resolution).
+            sandbox: Run the eval command inside a bubblewrap sandbox (default: True).
+            allow_network: Allow network access inside the sandbox (default: False).
         """
         self.eval_cmd = eval_cmd
         self.eval_timeout = eval_timeout
         self.codebase_dir = codebase_dir
+        self.sandbox = sandbox
+        self.allow_network = allow_network
+
+        if sandbox:
+            if shutil.which("bwrap") is None:
+                raise RuntimeError(
+                    "bubblewrap (bwrap) not found. Install it to use sandboxing.\n"
+                    "  Debian/Ubuntu: apt install bubblewrap\n"
+                    "  Fedora/RHEL:   dnf install bubblewrap\n"
+                    "  Arch:          pacman -S bubblewrap\n"
+                    "  macOS:         not supported (Linux-only)\n"
+                    "  Or pass --disable-sandbox to run without sandboxing."
+                )
 
     def run(self) -> EvalResult:
         """Execute the evaluation command and parse its output.
@@ -211,16 +269,29 @@ class Evaluator:
         start = time.time()
         proc = None
         try:
+            if self.sandbox:
+                bwrap_args, extra_env = _build_bwrap_args(
+                    self.eval_cmd, self.codebase_dir, self.allow_network
+                )
+                cmd = bwrap_args
+                shell = False
+            else:
+                cmd = self.eval_cmd
+                shell = True
+
+            env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+            if self.sandbox:
+                env.update(extra_env)
             # start_new_session=True puts the process in its own process
             # group so that kill() terminates not just the child shell but
             # also any subprocesses it spawns (e.g. pixi/env processes).
             proc = subprocess.Popen(
-                self.eval_cmd,
-                shell=True,
+                cmd,
+                shell=shell,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                env=env,
                 cwd=str(self.codebase_dir),
                 start_new_session=True,
             )
@@ -661,6 +732,8 @@ class EvoRunAgent:
         self.evaluator = Evaluator(
             eval_cmd, args.eval_timeout,
             codebase_dir=self.codebase.codebase_dir,
+            sandbox=getattr(args, "sandbox", True),
+            allow_network=getattr(args, "allow_network", False),
         )
 
         self.fake_run = getattr(args, 'fake_run', False)
@@ -3531,6 +3604,8 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "fusion_min_iters": 10,
     "fusion_prob": 0.5,
     "print_claude_output": False,
+    "sandbox": True,
+    "allow_network": False,
 }
 
 # Mapping from config.toml keys to argparse destination names.
@@ -3551,6 +3626,8 @@ _CONFIG_TO_ARGPARSE: dict[str, str] = {
     "fusion_min_iters": "fusion_min_iters",
     "fusion_prob": "fusion_prob",
     "print_claude_output": "print_claude_output",
+    "sandbox": "sandbox",
+    "allow_network": "allow_network",
 }
 
 
@@ -3719,6 +3796,19 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Disable web search for the planner (web search is enabled by default)",
     )
+    subparser.add_argument(
+        "--disable-sandbox",
+        action="store_false",
+        dest="sandbox",
+        help="Disable bubblewrap sandboxing for the eval command "
+             "(runs eval with full host access)",
+    )
+    subparser.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="Allow network access inside the sandbox. "
+             "By default, sandbox has no network access.",
+    )
 
 
 def _add_viz_args(subparser: argparse.ArgumentParser) -> None:
@@ -3830,6 +3920,10 @@ def _validate_run_args(args: argparse.Namespace) -> None:
     if task_config:
         _apply_task_config(args, task_config)
         _run_logger.info(f"Loaded config.toml from {args.path}")
+
+    # --allow-network implies --sandbox.
+    if getattr(args, "allow_network", False):
+        args.sandbox = True
 
     # Validate arguments.
     if not codebase_dir.exists():
