@@ -44,6 +44,7 @@ import os
 import random
 import re
 import shutil
+import shlex
 import signal
 import subprocess
 import sys
@@ -162,7 +163,7 @@ _TREEVEE_EVAL_CMD_ENV = "_TREEVEE_EVAL_CMD_ENV"
 def _build_bwrap_args(
     eval_cmd: str,
     codebase_dir: Path,
-    allow_network: bool = False,
+    allow_network: bool = True,
 ) -> tuple[list[str], dict[str, str]]:
     """Build bubblewrap command and extra env vars for the eval command.
 
@@ -175,19 +176,24 @@ def _build_bwrap_args(
         (command_list, extra_env) where extra_env contains the eval_cmd
         so it can be retrieved inside the sandbox via the environment.
     """
+    tmp_dir = codebase_dir / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     bwrap_args = [
         "bwrap",
         "--ro-bind", "/", "/",
         "--bind", str(codebase_dir), str(codebase_dir),
-        "--bind", "/tmp", "/tmp",
-        "--dev", "/dev",
+        "--bind", str(tmp_dir), "/tmp",
+        "--dev-bind", "/dev", "/dev",
+        "--proc", "/proc",
         "--chdir", str(codebase_dir),
         "--unshare-all",
         "--die-with-parent",
     ]
-    if not allow_network:
+    if allow_network:
+        bwrap_args.append("--share-net")
+    else:
         bwrap_args.append("--unshare-net")
-    bwrap_args.extend(["sh", "-c", f"exec $_TREEVEE_EVAL_CMD_ENV"])
+    bwrap_args.extend(["sh", "-c", f'eval "$_TREEVEE_EVAL_CMD_ENV"'])
 
     extra_env = {_TREEVEE_EVAL_CMD_ENV: eval_cmd}
     return bwrap_args, extra_env
@@ -228,7 +234,7 @@ class Evaluator:
         eval_timeout: int,
         codebase_dir: Path = Path("."),
         sandbox: bool = True,
-        allow_network: bool = False,
+        allow_network: bool = True,
     ):
         """Initialize the evaluator.
 
@@ -237,7 +243,7 @@ class Evaluator:
             eval_timeout: Maximum execution time in seconds.
             codebase_dir: Working directory to run from (for pixi env resolution).
             sandbox: Run the eval command inside a bubblewrap sandbox (default: True).
-            allow_network: Allow network access inside the sandbox (default: False).
+            allow_network: Allow network access inside the sandbox (default: True).
         """
         self.eval_cmd = eval_cmd
         self.eval_timeout = eval_timeout
@@ -733,7 +739,7 @@ class EvoRunAgent:
             eval_cmd, args.eval_timeout,
             codebase_dir=self.codebase.codebase_dir,
             sandbox=getattr(args, "sandbox", True),
-            allow_network=getattr(args, "allow_network", False),
+            allow_network=getattr(args, "allow_network", True),
         )
 
         self.fake_run = getattr(args, 'fake_run', False)
@@ -3605,7 +3611,7 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "fusion_prob": 0.5,
     "print_claude_output": False,
     "sandbox": True,
-    "allow_network": False,
+    "allow_network": True,
 }
 
 # Mapping from config.toml keys to argparse destination names.
@@ -3804,10 +3810,15 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
              "(runs eval with full host access)",
     )
     subparser.add_argument(
-        "--allow-network",
+        "--disable-network",
+        action="store_false",
+        dest="allow_network",
+        help="Disable network access inside the sandbox.",
+    )
+    subparser.add_argument(
+        "--print-command",
         action="store_true",
-        help="Allow network access inside the sandbox. "
-             "By default, sandbox has no network access.",
+        help="Print the full eval command (including sandboxing) and exit",
     )
 
 
@@ -3907,6 +3918,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to the codebase directory with the state file (default: current directory)",
     )
 
+    # --- prompt subcommand ---
+    subparsers.add_parser(
+        "prompt",
+        help="Output a meta-prompt for generating a new treevee task and eval",
+    )
+
     args = parser.parse_args()
     return args
 
@@ -3920,10 +3937,6 @@ def _validate_run_args(args: argparse.Namespace) -> None:
     if task_config:
         _apply_task_config(args, task_config)
         _run_logger.info(f"Loaded config.toml from {args.path}")
-
-    # --allow-network implies --sandbox.
-    if getattr(args, "allow_network", False):
-        args.sandbox = True
 
     # Validate arguments.
     if not codebase_dir.exists():
@@ -4007,6 +4020,21 @@ def _cmd_run(args: argparse.Namespace) -> None:
     _validate_run_args(args)
 
     codebase_root = Path(args.path)
+
+    # --print-command: print the full eval command and exit.
+    if getattr(args, "print_command", False):
+        eval_cmd = getattr(args, "eval_cmd", None) or "pixi run python eval.py"
+        sandbox = getattr(args, "sandbox", True)
+        allow_network = getattr(args, "allow_network", True)
+        if sandbox:
+            bwrap_args, extra_env = _build_bwrap_args(
+                eval_cmd, codebase_root.resolve(), allow_network
+            )
+            env_assignment = f'{_TREEVEE_EVAL_CMD_ENV}={shlex.quote(eval_cmd)}'
+            print(f"{env_assignment} {shlex.join(bwrap_args)}")
+        else:
+            print(eval_cmd)
+        return
 
     # --reset: delete the .treevee folder before starting.
     if args.reset:
@@ -4139,6 +4167,148 @@ def _cmd_init(args: argparse.Namespace) -> None:
     _run_logger.info(f"Created {exp_dir}/")
 
     _run_logger.info(f"Project initialized at {init_dir}")
+
+
+# ────────────────────────────────────────────────────────────
+# Prompt template
+# ────────────────────────────────────────────────────────────
+
+_PROMPT_TEMPLATE = """\
+You are helping create a new optimization task for treevee, an LLM-driven code optimizer. Below is everything you need to know to generate a complete project.
+
+---
+
+## What is treevee?
+
+treevee iteratively improves code using large language models and Monte Carlo Tree Search. It works like this:
+
+1. Pick a node from the search tree
+2. Ask a planner LLM to propose improvements, debug, or fuse ideas across branches
+3. Ask an editor LLM to implement the changes
+4. Run an eval command to compute a score
+5. Repeat — building a tree of solutions
+
+The planner LLM only has read access. The editor LLM can only edit files in the `experiment/` subfolder. The eval command runs in a sandbox using bubblewrap.
+
+---
+
+## Project structure
+
+A treevee project expects this layout:
+
+```
+my_project/
+├── experiment/   # code/params the LLM edits (required)
+├── eval.py       # evaluation harness (required)
+├── TASK.md       # task description for the LLM (required)
+└── config.toml   # optional, overrides defaults
+```
+
+Only files in `experiment/` are modified by the LLM. `eval.py` is read but never edited.
+
+---
+
+## eval.py contract (MUST follow this exactly)
+
+eval.py is the evaluation harness. treevee runs it via the command specified in config.toml (default: `pixi run python eval.py`).
+
+**It MUST output a JSON object on the very last line of stdout:**
+
+```json
+{"score": 0.72, "description": "MSE=1.2e-5, speed=0.8x, ..."}
+```
+
+Rules:
+- `score` is a float (required). treevee optimizes this value.
+- `description` is a string (recommended). It is shown in history/tree summaries and fed back to the LLM for context. Include key metrics here.
+- The JSON goes on the **last line** of stdout. treevee scans from the bottom up for the first valid JSON line.
+- Any other output (diagnostics, per-metric breakdowns) can go to stderr or earlier stdout lines.
+- Exit with code 0 on success.
+
+**Typical eval.py structure:**
+1. Import the function under test from `experiment/`
+2. Generate test cases (use a fixed random seed for reproducibility)
+3. Run the function across test cases
+4. Compute score from metrics using the formula from TASK.md
+5. Print the JSON result dict as the last line
+6. Optionally print detailed diagnostics to stderr for LLM feedback
+
+---
+
+## TASK.md format
+
+TASK.md describes the problem to the LLM. Good sections to include:
+
+### Title and Background
+What problem are you solving? Why does it matter? Give enough context for the LLM to understand the domain and make informed decisions.
+
+### Objective
+A clear statement of what the code should accomplish.
+
+### Files You Can Modify
+List the exact files in `experiment/` that the LLM can edit. Always include: *You may NOT modify: eval.py*
+
+### Interface
+The exact function signature(s) with type annotations and a docstring. The LLM must match this exactly.
+
+### Test Configuration
+Describe how evaluation works — how many test cases, what parameters vary, what random seed is used. The LLM needs to understand what it's being tested on to avoid overfitting.
+
+### Scoring
+The scoring formula, stated unambiguously. For example: `score = 10 * line_overlap + 5 * label_overlap - 2 * proximity`. State whether higher or lower is better (this goes in config.toml as `optim_mode`).
+
+### Constraints
+Library restrictions, output format requirements, determinism rules, performance limits.
+
+### Hints (optional but useful)
+Suggest approaches, common pitfalls, priority order (by scoring weight), free optimizations. The LLM will read these when planning improvements.
+
+---
+
+## config.toml
+
+Key settings (all have defaults):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `eval_cmd` | `pixi run python eval.py` | Command to run the eval |
+| `optim_mode` | `max` | `max` = higher score is better, `min` = lower |
+| `max_iters` | 50 | Number of optimization iterations |
+| `patience` | 10 | Stop if no improvement after N iters |
+| `eval_timeout` | 300 | Timeout per eval in seconds |
+| `max_children` | 10 | Max children per tree node |
+| `llm_retries` | 3 | Retries on LLM errors |
+| `decay_exploration` | true | Reduce exploration over time |
+| `use_fusion` | true | Enable cross-branch technique fusion |
+| `fusion_min_iters` | 10 | Min iters before fusion starts |
+| `fusion_prob` | 0.5 | Probability of fusion vs normal improvement |
+
+---
+
+## What to produce
+
+**First, run `treevee init` in the project directory.** This scaffolds a starter TASK.md, config.toml, and experiment/ directory. Then modify the generated files instead of writing them from scratch. If the user already has an existing project with template files, build off those — don't overwrite files like pixi.toml that may already be set up.
+
+After init, produce or update these files for the user's problem:
+
+1. **TASK.md** — fill in every section with real content. Be thorough in Background, Scoring, and Hints. The template has placeholder sections — replace them all.
+2. **eval.py** — create from scratch (init doesn't generate one). Follow the JSON output contract exactly. Use fixed random seeds. Print diagnostics to stderr. Import from `experiment/`.
+3. **config.toml** — update `optim_mode` and any non-default values for the task.
+4. **experiment/__init__.py** — init creates this; just make sure it exists.
+5. **experiment/<main_module>.py** — replace the placeholder with a stub implementation matching the interface signature in TASK.md. It should be runnable but doesn't need to be good (that's treevee's job).
+
+**When generating eval.py, follow these guidelines:**
+- Use a fixed random seed (e.g., `SEED = 42`)
+- Handle import errors and incorrect output shapes gracefully (return a very bad score rather than crashing)
+- Include rich per-metric breakdowns in the description string so the LLM can diagnose what to improve
+- Make the score formula match exactly what's in TASK.md
+- Run multiple test configurations and average the results for robustness
+"""
+
+
+def _cmd_prompt(args: argparse.Namespace) -> None:
+    """Output the treevee project generation meta-prompt to stdout."""
+    print(_PROMPT_TEMPLATE)
 
 
 def _restore_snapshot(codebase_dir: Path, snapshot_name: str) -> None:
@@ -4381,6 +4551,8 @@ def main() -> None:
         _cmd_tree(args)
     elif args.command == "history":
         _cmd_history(args)
+    elif args.command == "prompt":
+        _cmd_prompt(args)
     else:
         # Should not reach here since required=True on subparsers.
         parser = argparse.ArgumentParser(
@@ -4391,6 +4563,7 @@ def main() -> None:
         subparsers.add_parser("run", help="Run the optimization loop on a codebase")
         subparsers.add_parser("viz", help="Start the web visualization server (no optimizer)")
         subparsers.add_parser("init", help="Initialize a new treevee project")
+        subparsers.add_parser("prompt", help="Output a meta-prompt for generating a new treevee task and eval")
         parser.print_help()
         sys.exit(1)
 

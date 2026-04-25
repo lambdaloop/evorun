@@ -91,6 +91,7 @@ For step 3, I prompted claude code to generate a label placement evaluation task
 - `treevee restore` — restore the codebase from a snapshot (best, root, or specific node)
 - `treevee tree` — print a tree summary of the run with scores and edit summaries
 - `treevee history` — print iterations in chronological order with scores and edit summaries
+- `treevee prompt` — output a meta-prompt for generating a new treevee task and evaluation
 
 ## LLM models
 Configure your LLM providers in `~/.config/treevee/treevee.toml`. This file allows you to set different models, providers, and API keys for the planner and editor stages independently.
