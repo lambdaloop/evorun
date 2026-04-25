@@ -411,7 +411,9 @@ class CodebaseManager:
         self._task_file: Path | None = None
         self._task_content: str | None = None
         self._task_filename = task_file
+        self._context_content: str | None = None
         self._load_task_file()
+        self._load_context_file()
 
     def _load_task_file(self) -> None:
         """Find and read the task specification file from the codebase root."""
@@ -423,6 +425,21 @@ class CodebaseManager:
             except OSError:
                 self._task_content = None
                 self._task_file = None
+
+    def _load_context_file(self) -> None:
+        """Read optional CONTEXT.md from the codebase root.
+
+        CONTEXT.md provides supplementary background for planner LLMs
+        (project context, domain knowledge, constraints).  Unlike TASK.md
+        it is entirely optional — no error if missing.
+        """
+        context_file = self.codebase_dir / "CONTEXT.md"
+        if context_file.exists():
+            try:
+                self._context_content = context_file.read_text(encoding="utf-8")
+                _run_logger.info("Loaded context file: CONTEXT.md")
+            except OSError:
+                self._context_content = None
 
     def setup(self, resuming: bool = False) -> None:
         """Backup experiment/, TASK.md, eval.py, and pixi.toml.
@@ -1160,7 +1177,7 @@ Produce a concise plan following this structure.
                 cwd=str(self.codebase.codebase_dir),
                 model=self.planner_model,
                 env_overrides=planner_env,
-                max_turns=60 if self.enable_web_search else 30,
+                max_turns=60,
                 allowed_tools=['Read', 'WebSearch'] if self.enable_web_search else ['Read'],
                 log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
@@ -1249,12 +1266,14 @@ Do NOT modify eval.py, evaluation.py, or external test harnesses.
             _run_logger.warning(f"Editor failed (iter {self._iteration}): {e}")
             return (editor_prompt, "")
 
-    @staticmethod
-    def _format_error_context(result: EvalResult) -> str:
+    def _format_error_context(self, result: EvalResult, stored_output: str = "") -> str:
         """Build a shared error context string from an eval result.
 
         Used by both error planner and error editor to ensure consistent
-        error presentation.
+        error presentation.  When the current eval produced no output,
+        falls back to *stored_output* (the node's eval_output from when
+        it was created) so the LLM still sees what the eval should
+        produce.
         """
         parts = []
         if result.timed_out:
@@ -1262,6 +1281,7 @@ Do NOT modify eval.py, evaluation.py, or external test harnesses.
             parts.append("**Action**: Check for infinite loops, expensive operations, or blocking I/O")
         elif result.had_error:
             parts.append("**Issue**: Evaluation failed with error")
+            parts.append("**Action**: Check the error output and fix the issue")
         elif result.exit_code is not None and result.exit_code != 0:
             parts.append(f"**Issue**: Evaluation exited with code {result.exit_code}")
             parts.append("**Action**: Check the error output and fix the issue")
@@ -1276,12 +1296,18 @@ Do NOT modify eval.py, evaluation.py, or external test harnesses.
             parts.append("```")
             parts.append(last_3000)
             parts.append("```")
+        elif stored_output:
+            last_3000 = stored_output[-3000:] if len(stored_output) > 3000 else stored_output
+            parts.append("\n### Eval Output (from previous eval — current eval produced no output)\n")
+            parts.append("```")
+            parts.append(last_3000)
+            parts.append("```")
         else:
             parts.append("\n### Eval Output\n(none — the eval command produced no stdout/stderr)")
 
         return "\n".join(parts)
 
-    def _run_error_planner(self, result: EvalResult) -> tuple[str, str]:
+    def _run_error_planner(self, result: EvalResult, stored_output: str = "") -> tuple[str, str]:
         """Analyze evaluation errors and produce a fix plan.
 
         Two-stage planner for broken nodes: analyzes the error and
@@ -1289,16 +1315,27 @@ Do NOT modify eval.py, evaluation.py, or external test harnesses.
 
         Args:
             result: Eval result with error information.
+            stored_output: Eval output stored on the node at creation time,
+                used as fallback when result.output is empty.
 
         Returns:
             (planner_input_prompt, fix_plan) — full prompt sent and output received.
         """
-        error_text = self._format_error_context(result)
+        error_text = self._format_error_context(result, stored_output)
 
         planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
         task_section = (
             f"## Task\n{self.codebase._task_content}\n\n"
             if self.codebase._task_content else ""
+        )
+        context_section = (
+            f"## Context\n{self.codebase._context_content}\n\n"
+            if self.codebase._context_content else ""
+        )
+        context_rule = (
+            "6. CONTEXT.md is available with relevant background — "
+            "avoid reading unnecessary files.\n"
+            if self.codebase._context_content else ""
         )
         # Include recently changed files so the error planner can correlate
         file_change_lines = self._format_file_changes()
@@ -1314,17 +1351,21 @@ IMPORTANT RULES:
 3. Describe changes in plain language — the editor will implement them.
 4. Use the Read tool to read the files implicated by the error before planning.
 5. Prefer the smallest change that fixes the error. Do not refactor or improve unrelated code.
-
-{task_section}{file_change_section}## Error
+{context_rule}
+{task_section}{file_change_section}{context_section}## Error
 {error_text}
 
-## Instructions
-1. Read the files most likely involved in the error (start with recently changed files).
-2. Identify the root cause of the failure.
-3. List the specific files and code sections that need to be changed.
-4. Describe what each change should accomplish.
+## Plan Structure (keep it concise — you have limited turns)
 
-Produce a concise fix plan following this structure.
+**Root Cause** (1-2 sentences): What caused the failure?
+
+**Fix** (1-2 changes max): For each change:
+- What: The specific modification
+- Why: Why this change fixes the error
+- Where: Which file and function/section
+
+You have limited turns — be direct and focused. Do not enumerate multiple
+alternatives or discuss trade-offs. Pick the single best fix and commit.
 """
         try:
             result = _run_claude_cli_with_env(
@@ -1332,7 +1373,7 @@ Produce a concise fix plan following this structure.
                 cwd=str(self.codebase.codebase_dir),
                 model=self.planner_model,
                 env_overrides=planner_env,
-                max_turns=30,
+                max_turns=60,
                 allowed_tools=['Read'],
                 log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
@@ -1347,7 +1388,7 @@ Produce a concise fix plan following this structure.
             _run_logger.warning(f"Error planner failed (iter {self._iteration}): {e}")
             return (planner_prompt, "")
 
-    def _run_error_editor(self, fix_plan: str, result: EvalResult) -> tuple[str, str]:
+    def _run_error_editor(self, fix_plan: str, result: EvalResult, stored_output: str = "") -> tuple[str, str]:
         """Execute error fixes based on the planner's fix plan.
 
         Two-stage editor for broken nodes: receives the fix plan from the
@@ -1356,11 +1397,13 @@ Produce a concise fix plan following this structure.
         Args:
             fix_plan: The fix plan from the error planner.
             result: Eval result with error information.
+            stored_output: Eval output stored on the node at creation time,
+                used as fallback when result.output is empty.
 
         Returns:
             (editor_input_prompt, cli_output) — full prompt sent and output received.
         """
-        error_text = self._format_error_context(result)
+        error_text = self._format_error_context(result, stored_output)
 
         editor_prompt = f"""\
 You are a senior Python developer fixing errors in the codebase.
@@ -1700,12 +1743,13 @@ Do not try to improve the score — just fix the errors.
                 self.codebase.get_experiment_files(),
             )
 
-            error_planner_input, plan = self._run_error_planner(result)
+            stored_output = getattr(target_node, 'eval_output', '') or ''
+            error_planner_input, plan = self._run_error_planner(result, stored_output)
             planner_output = plan
             editor_input = ""
             if plan and plan.strip():
                 _run_logger.info(f"[Iter {self._iteration}] Running error editor with fix plan...")
-                error_editor_input, log_content = self._run_error_editor(plan, result)
+                error_editor_input, log_content = self._run_error_editor(plan, result, stored_output)
                 editor_input = error_editor_input
                 if log_content:
                     _run_logger.info(
@@ -2626,6 +2670,12 @@ Do not try to improve the score — just fix the errors.
             if result_lines:
                 parts.extend(result_lines)
 
+        # --- Context from CONTEXT.md ---
+        if self.codebase._context_content:
+            parts.append("## From CONTEXT.md")
+            parts.append("(Context file is available — avoid reading many files; rely on this context)")
+            parts.append(self.codebase._context_content)
+
         # --- What was tried (anti-repetition) ---
         tried_lines = self._format_previous_attempts()
         if tried_lines:
@@ -2749,6 +2799,15 @@ Do not try to improve the score — just fix the errors.
             f"## Task\n{self.codebase._task_content}\n\n"
             if self.codebase._task_content else ""
         )
+        fusion_context_section = (
+            f"## Context\n{self.codebase._context_content}\n\n"
+            if self.codebase._context_content else ""
+        )
+        fusion_context_rule = (
+            "5. CONTEXT.md is available with relevant background — "
+            "avoid reading unnecessary files.\n"
+            if self.codebase._context_content else ""
+        )
         fusion_feedback = f"""\
 You are a code planning architect for cross-branch fusion. Analyze the
 reference diffs below and plan how to selectively incorporate useful
@@ -2761,26 +2820,21 @@ IMPORTANT RULES:
 4. Include concrete details: if a technique references a specific algorithm,
    formula, or API, include the actual definition or parameters. The editor
    cannot look up or guess implementation details from a name alone.
+{fusion_context_rule}
+{fusion_task_section}{fusion_context_section}## Required Analysis
 
-{fusion_task_section}## Required Analysis
+**Reference Analysis** — For each reference, what is the core mechanism
+that drives its performance advantage?
 
-**Reference Analysis** — For each reference diff:
-- What does this reference do differently from the target?
-- Why did that difference lead to better performance?
-- What is the core mechanism, not just what it does?
+**Compatibility** — Will it integrate cleanly? Any conflicts?
 
-**Compatibility Check** — For each candidate technique:
-- Does it fit with the current architecture? Will it integrate cleanly?
-- Are there conflicts with existing components?
-
-**Proposed Fusion Plan**:
+**Proposed Fusion Plan** (1-2 changes max):
 - What: The specific technique(s) to incorporate and from which reference
 - Why: Why this technique addresses a limitation in the current solution
-- How: How it will be integrated (which file, which function/section)
-- Keep unchanged: What stays the same
+- Where: Which file and function/section
 
-Key principle: Fusion means understanding WHY techniques work, not blindly copying.
-One well-integrated technique is better than a messy combination of several.
+You have limited turns — be direct and focused. One well-integrated technique
+is better than a messy combination of several.
 
 ## Current Node Context
 
@@ -2806,7 +2860,7 @@ Produce a concise fusion plan following the Required Analysis structure above.
                 cwd=str(self.codebase.codebase_dir),
                 model=self.planner_model,
                 env_overrides=fusion_planner_env,
-                max_turns=30,
+                max_turns=60,
                 allowed_tools=['Read'],
                 log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=2,
