@@ -157,24 +157,17 @@ class HistoryEntry:
 # Bubblewrap sandbox helper
 # ────────────────────────────────────────────────────────────
 
-_TREEVEE_EVAL_CMD_ENV = "_TREEVEE_EVAL_CMD_ENV"
 
 
-def _build_bwrap_args(
+def _build_bwrap_cmd(
     eval_cmd: str,
     codebase_dir: Path,
     allow_network: bool = True,
-) -> tuple[list[str], dict[str, str]]:
-    """Build bubblewrap command and extra env vars for the eval command.
+) -> list[str]:
+    """Build bubblewrap command for the eval command.
 
-    The eval command is passed via an environment variable to avoid shell
-    quoting issues. Inside the sandbox, 'sh -c' reads it back and executes
-    it, preserving shell semantics (word splitting, globbing) equivalent
-    to the current shell=True behavior.
-
-    Returns:
-        (command_list, extra_env) where extra_env contains the eval_cmd
-        so it can be retrieved inside the sandbox via the environment.
+    The eval command is passed directly to sh -c inside the sandbox,
+    preserving shell semantics (word splitting, globbing, etc.).
     """
     tmp_dir = codebase_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -193,10 +186,9 @@ def _build_bwrap_args(
         bwrap_args.append("--share-net")
     else:
         bwrap_args.append("--unshare-net")
-    bwrap_args.extend(["sh", "-c", f'eval "$_TREEVEE_EVAL_CMD_ENV"'])
+    bwrap_args.extend(["sh", "-c", eval_cmd])
 
-    extra_env = {_TREEVEE_EVAL_CMD_ENV: eval_cmd}
-    return bwrap_args, extra_env
+    return bwrap_args
 
 
 # ────────────────────────────────────────────────────────────
@@ -276,18 +268,15 @@ class Evaluator:
         proc = None
         try:
             if self.sandbox:
-                bwrap_args, extra_env = _build_bwrap_args(
+                cmd = _build_bwrap_cmd(
                     self.eval_cmd, self.codebase_dir, self.allow_network
                 )
-                cmd = bwrap_args
                 shell = False
             else:
                 cmd = self.eval_cmd
                 shell = True
 
             env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-            if self.sandbox:
-                env.update(extra_env)
             # start_new_session=True puts the process in its own process
             # group so that kill() terminates not just the child shell but
             # also any subprocesses it spawns (e.g. pixi/env processes).
@@ -4019,11 +4008,10 @@ def _cmd_run(args: argparse.Namespace) -> None:
         sandbox = getattr(args, "sandbox", True)
         allow_network = getattr(args, "allow_network", True)
         if sandbox:
-            bwrap_args, extra_env = _build_bwrap_args(
+            bwrap_args = _build_bwrap_cmd(
                 eval_cmd, codebase_root.resolve(), allow_network
             )
-            env_assignment = f'{_TREEVEE_EVAL_CMD_ENV}={shlex.quote(eval_cmd)}'
-            print(f"{env_assignment} {shlex.join(bwrap_args)}")
+            print(shlex.join(bwrap_args))
         else:
             print(eval_cmd)
         return
