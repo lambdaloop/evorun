@@ -1705,6 +1705,12 @@ Do not try to improve the score — just fix the errors.
                 prev_eval_parts.append(str(stored))
         if result.output:
             prev_eval_parts.append("\n".join(str(x) for x in result.output))
+        # Fall back to the node's stored eval_output when the current
+        # eval produced nothing (e.g. silent crash / hang).
+        if not prev_eval_parts:
+            node_output = getattr(target_node, "eval_output", "") or ""
+            if node_output:
+                prev_eval_parts.append(node_output)
         prev_eval = "\n".join(prev_eval_parts)
 
         log_content: str = ""
