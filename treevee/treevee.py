@@ -662,10 +662,12 @@ def _run_claude_cli_with_env(
             env=merged_env,
         )
         output_lines = []
+        bytes_printed = 0
         try:
             for line in process.stdout:
                 if print_output:
                     print(line, end='', flush=True)
+                    bytes_printed += len(line.encode("utf-8"))
                 output_lines.append(line)
                 if log_fh:
                     log_fh.write(line)
@@ -674,6 +676,11 @@ def _run_claude_cli_with_env(
                 log_fh.close()
         process.wait()
         result = "".join(output_lines)
+        # Subprocess may buffer output when writing to a pipe (non-TTY),
+        # causing all output to arrive at once after the process exits.
+        # If nothing was printed during execution, print it now.
+        if print_output and bytes_printed == 0 and result:
+            print(result, end='', flush=True)
         if not result:
             raise RuntimeError("claude CLI returned empty output")
         return result
