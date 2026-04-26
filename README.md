@@ -99,34 +99,21 @@ Configure your LLM providers in `~/.config/treevee/treevee.toml`. This file allo
 The default is below:
 ```toml
 [planner]
-model = "claude-sonnet-4-6"
+model = "claude-opus-4-7"
 provider = "anthropic"
 api_key = "unset"
 
 [editor]
-model = "claude-sonnet-4-6"
+model = "claude-haiku-4-5"
 provider = "anthropic"
 api_key = "unset"
 ```
 
-- `model`: The model identifier to use (e.g., `claude-sonnet-4-6`, `claude-haiku-4-5`).
+- `model`: The model identifier to use (e.g., `claude-opus-4-7`, `claude-haiku-4-5`).
 - `provider`: The API provider. Supported values include `anthropic`, `deepseek`, `openrouter`, or a custom base URL (useful for running local models).
 - `api_key`: The API key for the provider. Set to `"unset"` to explicitly remove the key from the environment, this is nice for using your existing claude code authentication.
 
-If a value is omitted, treevee falls back to its defaults (e.g., `claude-sonnet-4-6` for models, `anthropic` for provider).
-
-Here is what I currently use (using the Qwen3.6 model on a GPU using llama.cpp):
-```toml
-[planner]
-model = "claude-opus-4-6"
-provider = "anthropic"
-api_key = "unset"
-
-[editor]
-model = "Qwen3.6-35B-A3B"
-provider = "http://localhost:8080"
-api_key = "sk-no-key-required"
-```
+If a value is omitted, treevee falls back to its defaults (`claude-opus-4-7` for the planner, `claude-haiku-4-5` for the editor, `anthropic` for the provider).
 
 Anectodally, I have found that using the Opus models will explore larger changes to the code, whereas using Sonnet or Haiku models will mostly do hyperparameter tuning. 
 

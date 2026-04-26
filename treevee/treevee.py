@@ -880,8 +880,8 @@ class EvoRunAgent:
         _config = _load_config_file()
         planner_cfg = _config.get("planner", {})
         editor_cfg = _config.get("editor", {})
-        self.planner_model = planner_cfg.get("model") or "claude-sonnet-4-6"
-        self.editor_model = editor_cfg.get("model") or self.planner_model
+        self.planner_model = planner_cfg.get("model") or "claude-opus-4-7"
+        self.editor_model = editor_cfg.get("model") or "claude-haiku-4-5"
 
         self.planner_provider = planner_cfg.get("provider") or "anthropic"
         self.editor_provider = editor_cfg.get("provider") or "anthropic"
