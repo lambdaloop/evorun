@@ -77,6 +77,18 @@ SPEED_WARNING_THRESHOLD = 0.7
 # Stagnation / no-change detection.
 MAX_CONSECUTIVE_NO_CHANGES = 3
 
+# Planner tier probabilities (must sum to 1.0).
+# Tier 1: small tweaks (hyperparameters, seeds, thresholds)
+# Tier 2: component changes (swap loss/backbone, add regularization, feature engineering)
+# Tier 3: paradigm shift (new algorithm, architectural rewrite, ensemble, GBDT<->NN)
+TIER_1_PROB = 0.50
+TIER_2_PROB = 0.30
+TIER_3_PROB = 0.20
+
+# Stagnation threshold: after N consecutive non-improvements on a branch,
+# force Tier 2 or 3 (skip Tier 1).
+STAGNATION_TIER_ESCALATE = 3
+
 # Response truncation limits.
 MAX_LLM_RESPONSE_SUMMARY = 300
 MAX_EDIT_SUMMARY_CHARS = 100
@@ -151,6 +163,7 @@ class HistoryEntry:
     editor_input: str = ""
     editor_output: str = ""
     is_duplicate: bool = False
+    tier: int = 1
 
 
 # ────────────────────────────────────────────────────────────
@@ -1037,6 +1050,7 @@ class EvoRunAgent:
                 editor_input=e.get("editor_input", ""),
                 editor_output=e.get("editor_output", ""),
                 is_duplicate=e.get("is_duplicate", False),
+                tier=e.get("tier", 1),
             )
             all_history.append(h)
         # Only keep history from the current session (iterations < next_iteration)
@@ -1230,7 +1244,37 @@ class EvoRunAgent:
         needs_fix = len(review_notes) > 0
         return needs_fix, "\n".join(review_notes)
 
-    def _run_planner(self, feedback: str) -> tuple[str, str]:
+    def _select_planner_tier(self, target_node_id: str) -> int:
+        """Select planner tier based on stagnation and probabilities.
+
+        If the target branch has stagnated for STAGNATION_TIER_ESCALATE or more
+        consecutive non-improvements, force Tier 2 or 3 (skip small tweaks).
+
+        Returns:
+            Integer 1 (tuning), 2 (components), or 3 (paradigm shift).
+        """
+        stagnation = self._parent_stagnation.get(target_node_id, 0)
+        if stagnation >= STAGNATION_TIER_ESCALATE:
+            tier = random.choice([2, 3])
+            _run_logger.info(
+                f"[Iter {self._iteration}] Stagnation={stagnation} >= "
+                f"{STAGNATION_TIER_ESCALATE} — forced Tier {tier}"
+            )
+        else:
+            r = random.random()
+            if r < TIER_1_PROB:
+                tier = 1
+            elif r < TIER_1_PROB + TIER_2_PROB:
+                tier = 2
+            else:
+                tier = 3
+            _run_logger.info(
+                f"[Iter {self._iteration}] Stagnation={stagnation} — "
+                f"sampled Tier {tier}"
+            )
+        return tier
+
+    def _run_planner(self, feedback: str, tier: int = 1) -> tuple[str, str]:
         """Run the planner stage: analyze feedback and produce a free-form plan.
 
         The planner reads the full feedback prompt and outputs a natural-language
@@ -1239,6 +1283,7 @@ class EvoRunAgent:
 
         Args:
             feedback: The formatted feedback string from _format_feedback().
+            tier: Planner tier — 1 (tuning), 2 (components), or 3 (paradigm shift).
 
         Returns:
             (planner_input_prompt, plan_text) — full prompt sent and output received.
@@ -1260,30 +1305,77 @@ class EvoRunAgent:
                 "   values, or a one-sentence description of the algorithm steps. The editor\n"
                 "   cannot look up or guess implementation details from a name alone."
             )
+        common_rules = (
+            "IMPORTANT RULES:\n"
+            "1. Do NOT write any code. Do NOT use Edit or Write tools.\n"
+            "2. Do NOT produce diffs or file content.\n"
+            "3. Describe changes in plain language — the editor will implement them.\n"
+            "4. Use the Read tool to inspect the specific files relevant to your plan.\n"
+            f"{detail_rule}\n"
+            "\n"
+            "You have limited turns — be direct and focused. Do not enumerate multiple\n"
+            "alternatives or discuss trade-offs. Pick the single best approach and commit.\n"
+        )
+
+        if tier == 1:
+            tier_header = (
+                "**Tier 1: Optimization** — keep the current architecture and data flow fixed.\n"
+                "Focus on: hyperparameters, learning rate schedules, random seeds,\n"
+                "post-processing thresholds, training epochs, batch sizes.\n"
+                "\n"
+                "Do NOT change the model architecture, loss function, or data pipeline.\n"
+            )
+            plan_structure = (
+                "## Plan Structure\n"
+                "\n"
+                "**Diagnosis**: What parameter/training issue is limiting performance?\n"
+                "\n"
+                "**Proposed Change** (1 change): single, focused tuning adjustment\n"
+            )
+        elif tier == 2:
+            tier_header = (
+                "**Tier 2: Representation & Components** — change specific modules,\n"
+                "keep the overall paradigm.\n"
+                "\n"
+                "Focus on: swap backbone/model variant, change loss function,\n"
+                "add/remove regularization, new feature engineering, data augmentation,\n"
+                "input normalization.\n"
+            )
+            plan_structure = (
+                "## Plan Structure\n"
+                "\n"
+                "**Diagnosis**: Is the model underfitting, overfitting, or misaligned with data?\n"
+                "\n"
+                "**Proposed Changes** (1-2 changes): what component(s) to change and why\n"
+            )
+        else:  # tier == 3
+            tier_header = (
+                "**Tier 3: Systemic Paradigm Shift** — fundamentally change the approach.\n"
+                "The old code structure may need significant rewriting.\n"
+                "\n"
+                "Focus on: switching GBDT<->Neural Net, single model->ensemble,\n"
+                "regression->classification (binning), multi-task learning,\n"
+                "pseudo-labeling, self-supervised pretraining, completely new algorithm.\n"
+                "\n"
+                "Think big — do not get attached to the current approach.\n"
+            )
+            plan_structure = (
+                "## Plan Structure\n"
+                "\n"
+                "**Assessment**: What systemic limitation makes the current approach hit a ceiling?\n"
+                "\n"
+                "**Proposed Architecture**: What new approach/paradigm should replace it?\n"
+                "\n"
+                "**Migration Strategy**: Which files change structure, what new modules are needed?\n"
+            )
+
         planner_prompt = f"""\
 You are a code planning architect. Your job is to analyze evaluation results
 and produce a focused plan for what changes to make.
 
-IMPORTANT RULES:
-1. Do NOT write any code. Do NOT use Edit or Write tools.
-2. Do NOT produce diffs or file content.
-3. Describe changes in plain language — the editor will implement them.
-4. Use the Read tool to inspect the specific files relevant to your plan.
-{detail_rule}
-
-## Plan Structure (keep it concise)
-
-**Diagnosis** (1 sentence): What is causing poor performance?
-
-**Proposed Changes** (1-3 changes max): For each change:
-- What: The specific modification
-- Why: Why this change addresses the problem
-- Where: Which file and function/section
-  (A completely different algorithm is fine if the current approach has hit
-   a ceiling — don't just tune parameters.)
-
-You have limited turns — be direct and focused. Do not enumerate multiple
-alternatives or discuss trade-offs. Pick the single best approach and commit.
+{common_rules}
+{tier_header}
+{plan_structure}
 
 Here is the feedback to analyze:
 {feedback}
@@ -1653,6 +1745,7 @@ Do not try to improve the score — just fix the errors.
         self._last_modified_files = []
         self._last_added_files = []
         self._last_deleted_files = []
+        tier = 0  # 0 = not set (fusion/error path); 1-3 for normal planner
 
         # ---- Step 0: Select node to expand (UCT across entire tree) ----
         target_branch_id = len(self.tree.root.children) + 1
@@ -1901,7 +1994,9 @@ Do not try to improve the score — just fix the errors.
                     self.codebase.get_experiment_files(),
                 )
 
-                planner_input, plan = self._run_planner(feedback)
+                tier = self._select_planner_tier(target_node.id)
+                _run_logger.info(f"[Iter {self._iteration}] Planner tier: {tier}")
+                planner_input, plan = self._run_planner(feedback, tier=tier)
                 planner_output = plan
                 editor_input = ""
                 if plan and plan.strip():
@@ -2126,6 +2221,7 @@ Do not try to improve the score — just fix the errors.
                 editor_input=(editor_input or "").strip(),
                 editor_output=(log_content or "").strip(),
                 is_duplicate=True,
+                tier=tier,
             ))
             self._iteration += 1
             self.save_state()
@@ -2197,6 +2293,7 @@ Do not try to improve the score — just fix the errors.
             planner_output=(planner_output or "").strip(),
             editor_input=(editor_input or "").strip(),
             editor_output=(log_content or "").strip(),
+            tier=tier,
         ))
 
         # Update global best if child score improves (respects optim-mode).
@@ -2343,6 +2440,7 @@ Do not try to improve the score — just fix the errors.
                 "planner_output": e.planner_output,
                 "editor_input": e.editor_input,
                 "editor_output": e.editor_output,
+                "tier": e.tier,
             })
         # Derive next_iteration from tree structure to stay in sync with history
         max_step = max((n.step for n in self.tree.journal.nodes), default=0)
@@ -4635,13 +4733,14 @@ def _cmd_history(args: argparse.Namespace) -> None:
         is_best = short_id == best_id_prefix[:8] if best_id_prefix else False
 
         is_dup = entry.get("is_duplicate", False) or (node is None and score is None and not summary)
+        tier = entry.get("tier", 1)
         score_str = f"{score:.4f}" if score is not None else "   n/a"
         best_marker = " ★" if is_best else ""
         if is_dup:
-            print(f"[{step:>4}] (duplicate — skipped)")
+            print(f"[{step:>4}] T{tier} (duplicate — skipped)")
         else:
             summary_str = f"  {summary}" if summary else ""
-            print(f"[{step:>4}] [{short_id}] score={score_str}{best_marker}{summary_str}")
+            print(f"[{step:>4}] [{short_id}] T{tier} score={score_str}{best_marker}{summary_str}")
 
 
 def _cmd_tree(args: argparse.Namespace) -> None:
@@ -4683,9 +4782,10 @@ def _cmd_tree(args: argparse.Namespace) -> None:
         is_best = short == best_id_prefix or (best_id_prefix and nid[:8] == best_id_prefix[:8])
         best_marker = " ★" if is_best else ""
         entry = history.get(node.get("step", -1))
+        tier = entry.get("tier", 1) if entry else 1
         summary = entry.get("edit_summary", "").strip() if entry else ""
         summary_str = f"  {summary}" if summary else ""
-        print(f"{prefix}{connector}{icon} [{short}] score={score_str}{best_marker}{summary_str}")
+        print(f"{prefix}{connector}{icon} T{tier} [{short}] score={score_str}{best_marker}{summary_str}")
         kids = sorted(children.get(nid, []), key=lambda k: nodes[k].get("step", 0))
         child_prefix = prefix + ("    " if is_last else "│   ")
         for i, kid in enumerate(kids):
