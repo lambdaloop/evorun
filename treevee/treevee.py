@@ -371,7 +371,15 @@ class Evaluator:
                 cmd = self.eval_cmd
                 shell = True
 
-            env = {**os.environ, "PYTHONUNBUFFERED": "1", "TMPDIR": str(self.tmpdir)}
+            # TMPDIR must point at the path that's actually writable inside
+            # the sandbox. bwrap (Linux) bind-remaps the host tmpdir to /tmp,
+            # so inside the sandbox /tmp is the right value. zerobox (macOS)
+            # doesn't remap, so the real host path is correct.
+            if self.sandbox and sys.platform != "darwin":
+                inside_tmpdir = "/tmp"
+            else:
+                inside_tmpdir = str(self.tmpdir)
+            env = {**os.environ, "PYTHONUNBUFFERED": "1", "TMPDIR": inside_tmpdir}
             # start_new_session=True puts the process in its own process
             # group so that kill() terminates not just the child shell but
             # also any subprocesses it spawns (e.g. pixi/env processes).

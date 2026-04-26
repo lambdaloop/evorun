@@ -302,17 +302,35 @@ def test_eval_timeout_returns_quickly(codebase_dir: Path):
 
 
 @needs_backend
-def test_tmpdir_env_is_set(codebase_dir: Path):
-    # On macOS (zerobox) tmpdir is exposed as TMPDIR. On Linux (bwrap)
-    # tmpdir is bind-mounted to /tmp. Either way TMPDIR should be the
-    # value the user configured.
-    ev = Evaluator(
-        'echo "{\\"score\\": 0, \\"description\\": \\"$TMPDIR\\"}"',
-        30,
-        codebase_dir=codebase_dir,
-        sandbox=True,
-        tmpdir="/tmp",
-    )
-    result = ev.run()
-    assert result.exit_code == 0, result.output
-    assert result.description == "/tmp"
+def test_tmpdir_env_writable_with_custom_path(codebase_dir: Path):
+    # Regression: with tmpdir=/scratch/... on Linux, TMPDIR was being set
+    # to the host path, but bwrap remaps that path to /tmp inside the
+    # sandbox — so the host path is RO inside and writes via TMPDIR failed.
+    # TMPDIR must point at the IN-sandbox path:
+    #   - Linux (bwrap): always "/tmp" (bind target)
+    #   - macOS (zerobox): the real host path (no remap)
+    custom_tmp = codebase_dir.parent / "alt_tmp"
+    custom_tmp.mkdir(exist_ok=True)
+    try:
+        ev = Evaluator(
+            # Write into $TMPDIR; if that fails, sentinel will be missing.
+            'touch "$TMPDIR/written" && echo "{\\"score\\": 1}" '
+            '|| echo "{\\"score\\": 0}"',
+            30,
+            codebase_dir=codebase_dir,
+            sandbox=True,
+            tmpdir=str(custom_tmp),
+        )
+        result = ev.run()
+        assert result.exit_code == 0, result.output
+        assert result.score == 1, f"writing to TMPDIR failed: {result.output}"
+        # And the file should actually exist on the host (proving the
+        # in-sandbox write landed in the right place).
+        if sys.platform == "darwin":
+            assert (custom_tmp / "written").exists()
+        else:
+            # bwrap remaps custom_tmp -> /tmp; written ends up in custom_tmp
+            # on the host (since /tmp inside == custom_tmp on host).
+            assert (custom_tmp / "written").exists()
+    finally:
+        shutil.rmtree(custom_tmp, ignore_errors=True)
