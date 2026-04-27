@@ -22,6 +22,12 @@ Stopping criteria (any condition stops the run):
     3.  All branches stagnant (per-branch patience > N consecutive no-improvement)
     4.  Too many consecutive eval timeouts
 
+    5.  Rate limit persists after max exponential backoff (128 min)
+
+    Rate limits are retried inside the Claude CLI runner with the same
+    exponential backoff as LLM failures (using --llm-retries and
+    --llm-retry-base-delay).
+
 Usage:
     python treevee.py ./codebase \\
         --max-iters 20 --patience 5 --reset
@@ -812,14 +818,27 @@ def _run_claude_cli_with_env(
         return result
 
     for attempt in range(1, retries + 1):
+        result = None
+        error = None
         try:
-            return _do_call()
+            result = _do_call()
         except Exception as e:
+            error = str(e)
+
+        if error:
             logger.warning(
-                f"Claude CLI failed (attempt {attempt}/{retries}): {e}"
+                f"Claude CLI failed (attempt {attempt}/{retries}): {error}"
             )
-            if attempt < retries:
-                time.sleep(retry_base_delay * (2 ** (attempt - 1)))
+        elif _RATE_LIMIT_RE.search(result):
+            logger.warning(
+                f"Rate limit detected (attempt {attempt}/{retries})"
+            )
+        else:
+            return result  # success
+
+        if attempt < retries:
+            time.sleep(retry_base_delay * (3 ** (attempt - 1)))
+
     raise RuntimeError(f"Claude CLI failed after {retries} retries")
 
 
@@ -998,24 +1017,6 @@ class EvoRunAgent:
             )
         except Exception as e:
             _run_logger.warning(f"Failed to create .claude/settings.local.json: {e}")
-
-    def _check_rate_limit(self, output: str) -> bool:
-        """Check if Claude CLI output indicates a rate limit / quota exhaustion.
-
-        If detected, sets self._stop and logs a message.
-
-        Args:
-            output: The raw output string from the Claude CLI.
-
-        Returns:
-            True if a rate limit was detected, False otherwise.
-        """
-        if _RATE_LIMIT_RE.search(output):
-            _run_logger.error("[LLM] Rate limit / quota exhausted — stopping run.")
-            self._stop = True
-            self.save_state()
-            return True
-        return False
 
     def _attempt_resume(self) -> bool:
         """Try to resume from a saved state file.
@@ -1392,13 +1393,11 @@ Produce a concise plan following this structure.
                 max_turns=60,
                 allowed_tools=['Read', 'WebSearch'] if self.enable_web_search else ['Read'],
                 log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
-                retries=getattr(self, 'llm_retries', 3),
-                retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+                retries=getattr(self, 'llm_retries', 9),
+                retry_base_delay=getattr(self, 'llm_retry_base_delay', 5.0),
                 stage="planner",
                 print_output=self.verbose,
             )
-            if self._check_rate_limit(result):
-                return (planner_prompt, "")
             return (planner_prompt, result.strip())
         except Exception as e:
             _run_logger.warning(f"Planner failed (iter {self._iteration}): {e}")
@@ -1466,13 +1465,11 @@ Do NOT modify eval.py, evaluation.py, or external test harnesses.
                 max_turns=500,
                 allowed_tools=['Read', 'Edit', 'Write'],
                 log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
-                retries=getattr(self, 'llm_retries', 3),
-                retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+                retries=getattr(self, 'llm_retries', 9),
+                retry_base_delay=getattr(self, 'llm_retry_base_delay', 5.0),
                 stage="editor",
                 print_output=self.verbose,
             )
-            if self._check_rate_limit(result):
-                return (editor_prompt, "")
             return (editor_prompt, result)
         except Exception as e:
             _run_logger.warning(f"Editor failed (iter {self._iteration}): {e}")
@@ -1588,13 +1585,11 @@ alternatives or discuss trade-offs. Pick the single best fix and commit.
                 max_turns=60,
                 allowed_tools=['Read'],
                 log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
-                retries=getattr(self, 'llm_retries', 3),
-                retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+                retries=getattr(self, 'llm_retries', 9),
+                retry_base_delay=getattr(self, 'llm_retry_base_delay', 5.0),
                 stage="planner",
                 print_output=self.verbose,
             )
-            if self._check_rate_limit(result):
-                return (planner_prompt, "")
             return (planner_prompt, result.strip())
         except Exception as e:
             _run_logger.warning(f"Error planner failed (iter {self._iteration}): {e}")
@@ -1646,13 +1641,11 @@ Do not try to improve the score — just fix the errors.
                 max_turns=500,
                 allowed_tools=['Read', 'Edit', 'Write'],
                 log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
-                retries=getattr(self, 'llm_retries', 3),
-                retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+                retries=getattr(self, 'llm_retries', 9),
+                retry_base_delay=getattr(self, 'llm_retry_base_delay', 5.0),
                 stage="editor",
                 print_output=self.verbose,
             )
-            if self._check_rate_limit(result):
-                return (editor_prompt, "")
             return (editor_prompt, result)
         except Exception as e:
             _run_logger.warning(f"Error editor failed (iter {self._iteration}): {e}")
@@ -3091,8 +3084,7 @@ Produce a concise fusion plan following the Required Analysis structure above.
                 stage="planner",
                 print_output=self.verbose,
             )
-            if not self._check_rate_limit(fusion_plan_raw):
-                fusion_plan = fusion_plan_raw.strip()
+            fusion_plan = fusion_plan_raw.strip()
         except Exception as e:
             _run_logger.warning(f"[Fusion] Planner failed: {e}")
             fusion_plan = ""
@@ -3138,8 +3130,6 @@ a messy combination of several.
                     stage="editor",
                     print_output=self.verbose,
                 )
-                if self._check_rate_limit(log_content):
-                    log_content = ""
             except Exception as e:
                 _run_logger.error(f"[Fusion] Editor CLI failed: {e}")
                 log_content = ""
@@ -3870,8 +3860,8 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "time_limit": 0,
     "patience": 10,
     "eval_timeout": 300,
-    "llm_retries": 3,
-    "llm_retry_base_delay": 3.0,
+    "llm_retries": 9,
+    "llm_retry_base_delay": 5.0,
     "decay_exploration": True,
     "eval_cmd": None,
     "use_fusion": True,
@@ -3998,12 +3988,12 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
         help="Timeout per evaluation run in seconds (default: 300)",
     )
     subparser.add_argument(
-        "--llm-retries", type=int, default=3,
-        help="Retry LLM query on failure (default: 3)",
+        "--llm-retries", type=int, default=9,
+        help="Retry LLM query on failure (triple backoff, default: 9, ~4.6h cumulative)",
     )
     subparser.add_argument(
-        "--llm-retry-base-delay", type=float, default=3.0,
-        help="Base delay (s) for exponential backoff (default: 3.0)",
+        "--llm-retry-base-delay", type=float, default=5.0,
+        help="Base delay (s) for exponential backoff (default: 5.0)",
     )
     subparser.add_argument(
         "--fake-run",
@@ -4383,8 +4373,8 @@ def _cmd_init(args: argparse.Namespace) -> None:
         # Fallback: write a minimal config inline.
         config_dst.write_text(
             "# treevee config.toml\n"
-            "llm_retries = 3\n"
-            "llm_retry_base_delay = 3.0\n"
+            "llm_retries = 9\n"
+            "llm_retry_base_delay = 5.0\n"
             "eval_cmd = \"pixi run python eval.py\"\n"
             "optim_mode = \"max\"\n"
             "max_iters = 50\n"
@@ -4543,7 +4533,7 @@ Key settings (all have defaults):
 | `patience` | 10 | Stop if no improvement after N iters |
 | `eval_timeout` | 300 | Timeout per eval in seconds |
 | `max_children` | 10 | Max children per tree node |
-| `llm_retries` | 3 | Retries on LLM errors |
+| `llm_retries` | 9 | Retries on LLM errors (triple backoff, ~4.6h cumulative) |
 | `decay_exploration` | true | Reduce exploration over time |
 | `use_fusion` | true | Enable cross-branch technique fusion |
 | `fusion_min_iters` | 10 | Min iters before fusion starts |

@@ -8,8 +8,8 @@
 #   ~/.config/treevee/treevee.toml (planner/editor sections)
 
 # ── LLM ──────────────────────────────────────────────────────────
-llm_retries = 3             # Retry LLM query on failure (default: 3)
-llm_retry_base_delay = 3.0  # Base delay (s) for exponential backoff (default: 3.0)
+llm_retries = 9             # Retry LLM query on failure (triple backoff, ~4.6h cumulative)
+llm_retry_base_delay = 5.0  # Base delay (s) for exponential backoff (default: 5.0)
 
 # ── Search ───────────────────────────────────────────────────────
 eval_cmd = "pixi run python eval.py"  # Evaluation command to run
