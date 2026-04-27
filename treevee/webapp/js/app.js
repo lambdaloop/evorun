@@ -106,6 +106,27 @@ function getBestIterFromSnapshot(snapshotName, nodes) {
   return entry ? entry.iter : null;
 }
 
+function initTabs() {
+  const buttons = document.querySelectorAll('.tab-btn');
+  buttons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      // Deactivate all tabs
+      buttons.forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+
+      // Activate clicked tab
+      btn.classList.add('active');
+      const panel = document.getElementById('tab-' + btn.dataset.tab);
+      if (panel) panel.classList.add('active');
+
+      // Resize chart if switching to chart tab
+      if (btn.dataset.tab === 'chart' && typeof scoreChart !== 'undefined' && scoreChart) {
+        scoreChart.resize();
+      }
+    });
+  });
+}
+
 function renderAll() {
   renderSummary();
   renderScoreChart();
@@ -129,6 +150,7 @@ async function loadFromServer() {
   } catch (err) {
     console.error('Failed to load state:', err);
   }
+  initTabs();
   initTreeControls();
   initDiffClose();
 })();

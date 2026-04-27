@@ -202,27 +202,63 @@ section:hover h2 {
   overflow: visible;
 }
 
-/* ── Split view ── */
+/* ── Tab bar ── */
 
-#split-view {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+#tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0;
+}
+
+.tab-btn {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-bottom: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-size: 15px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  position: relative;
+  bottom: -1px;
+}
+
+.tab-btn:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.tab-btn.active {
+  color: var(--accent-pink);
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+  border-bottom-color: var(--bg-secondary);
+}
+
+/* ── Tab panels ── */
+
+.tab-panel {
+  display: none;
   margin-bottom: 28px;
 }
 
-@media (max-width: 1024px) {
-  #split-view {
-    grid-template-columns: 1fr;
-  }
+.tab-panel.active {
+  display: block;
 }
+
+/* ── Tree + Iterations panels ── */
 
 #tree-panel, #iterations-panel {
   background: linear-gradient(180deg, var(--bg-secondary) 0%, rgba(35, 21, 53, 0.9) 100%);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 16px;
-  max-height: 600px;
+  max-height: 65vh;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-sm);

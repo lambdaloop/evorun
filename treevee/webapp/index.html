@@ -23,17 +23,31 @@
       <!-- Summary bar -->
       <section id="summary-bar" style="font-size:15px;color:var(--text-secondary);margin-bottom:12px;"></section>
 
-      <!-- Score chart -->
-      <section id="chart-section">
-        <h2>Score Progression</h2>
-        <div class="chart-container">
-          <canvas id="score-chart"></canvas>
-        </div>
-      </section>
+      <!-- Tab bar -->
+      <nav id="tab-bar">
+        <button class="tab-btn active" data-tab="chart">Score Progression</button>
+        <button class="tab-btn" data-tab="iterations">Iterations</button>
+        <button class="tab-btn" data-tab="tree">MCTS Tree</button>
+      </nav>
 
-      <!-- Tree + Iterations layout -->
-      <div id="split-view">
-        <!-- Tree panel -->
+      <!-- Tab panels -->
+      <div class="tab-panel active" id="tab-chart">
+        <section id="chart-section">
+          <h2>Score Progression</h2>
+          <div class="chart-container">
+            <canvas id="score-chart"></canvas>
+          </div>
+        </section>
+      </div>
+
+      <div class="tab-panel" id="tab-iterations">
+        <section id="iterations-panel">
+          <h2>Iterations</h2>
+          <div id="iterations-list"></div>
+        </section>
+      </div>
+
+      <div class="tab-panel" id="tab-tree">
         <section id="tree-panel">
           <h2>MCTS Tree</h2>
           <div class="tree-controls">
@@ -41,12 +55,6 @@
             <button id="collapse-all">Collapse all</button>
           </div>
           <div id="tree-container"></div>
-        </section>
-
-        <!-- Iterations panel -->
-        <section id="iterations-panel">
-          <h2>Iterations</h2>
-          <div id="iterations-list"></div>
         </section>
       </div>
 
