@@ -490,7 +490,7 @@ function renderScoreChart() {
   currentProgression = StateLoader.getProgressionImprovements();
   if (currentProgression.length === 0) return;
 
-  _chartImprovements = currentProgression.filter((p) => !p.isRoot);
+  _chartImprovements = currentProgression.filter((p) => !p.isRoot && p.isImprovement);
   _chartDiscarded = [];
 
   const pathValues = currentProgression.map((p) => p.score).filter((v) => v !== null);
@@ -524,11 +524,12 @@ function renderScoreChart() {
           data: currentProgression.map((p) => ({ x: p.iter, y: p.score })),
           pointRadius: 6,
           pointHoverRadius: 8,
-          pointBackgroundColor: currentProgression.map((p) =>
-            p.isRoot ? '#ffb347' :
-              p.score === StateLoader.getBestScore() ? '#80f0b0' :
-              'rgba(255, 176, 224, 0.9)'
-          ),
+          pointBackgroundColor: currentProgression.map((p) => {
+            if (p.isRoot) return '#ffb347';
+            if (p.score === StateLoader.getBestScore()) return '#80f0b0';
+            if (p.isImprovement) return 'rgba(181, 233, 205, 0.85)';
+            return 'rgba(247, 208, 199, 0.85)';
+          }),
           pointBorderColor: 'rgba(255,255,255,0.25)',
           pointBorderWidth: 1,
           showLine: false,
@@ -556,7 +557,7 @@ function renderScoreChart() {
         legend: { display: false },
         title: {
           display: true,
-          text: `${_chartImprovements.length} improvements along the path`,
+          text: `best path · ${_chartImprovements.length} improvements / ${currentProgression.length - 1} nodes`,
           color: '#f0e0ff',
           font: { size: 15, weight: 'normal' },
           padding: { bottom: 12 },

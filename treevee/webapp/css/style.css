@@ -258,13 +258,20 @@ section:hover h2 {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 16px;
-  max-height: 65vh;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-sm);
   transition: border-color 0.25s ease, box-shadow 0.25s ease;
   position: relative;
   overflow: hidden;
+}
+
+#iterations-panel {
+  max-height: 65vh;
+}
+
+#tree-panel {
+  height: 85vh;
 }
 
 #tree-panel::before, #iterations-panel::before {
@@ -319,12 +326,122 @@ section:hover h2 {
   box-shadow: var(--glow-pink);
 }
 
-/* ── Tree visualization ── */
+/* ── Tree visualization (D3 graph) ── */
 
 #tree-container {
-  overflow: auto;
+  overflow: hidden;
   flex: 1;
+  min-height: 0;
+  position: relative;
 }
+
+#tree-container .tree-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.tree-link {
+  fill: none;
+  stroke: var(--border-light);
+  stroke-width: 1.5px;
+  stroke-opacity: 0.6;
+}
+
+.tree-link.on-best-path {
+  stroke: var(--accent-mint);
+  stroke-width: 2.5px;
+  stroke-opacity: 0.9;
+}
+
+.fusion-link {
+  fill: none;
+  stroke: var(--accent-yellow);
+  stroke-width: 1.5px;
+  stroke-opacity: 0.6;
+  stroke-dasharray: 5 4;
+}
+
+.tree-node-svg {
+  transition: filter 0.15s ease;
+}
+
+.tree-node-svg:hover {
+  filter: drop-shadow(0 0 6px rgba(247,194,224,0.5));
+}
+
+.tree-node-svg.active circle {
+  stroke: var(--accent-pink) !important;
+  stroke-width: 3px !important;
+}
+
+.tree-node-svg.active {
+  filter: drop-shadow(0 0 8px rgba(247,194,224,0.7));
+}
+
+.tree-node-svg.best-node {
+  filter: drop-shadow(0 0 7px rgba(181,233,205,0.8));
+}
+
+.node-emoji {
+  font-size: 20px;
+  pointer-events: none;
+  user-select: none;
+}
+
+#tree-node-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 260px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 8px 12px;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+}
+
+#tree-node-tooltip .tt-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+#tree-node-tooltip .tt-delta {
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+#tree-node-tooltip .tt-summary {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.node-label-id {
+  font-family: monospace;
+  font-size: 13px;
+  fill: var(--text-muted);
+  pointer-events: none;
+}
+
+.node-label-score {
+  font-family: monospace;
+  font-size: 13px;
+  fill: var(--text-secondary);
+  pointer-events: none;
+}
+
+.node-label-score.improved { fill: var(--accent-mint); }
+.node-label-score.degraded { fill: var(--accent-peach); }
+.node-label-score.na       { fill: var(--text-muted); opacity: 0.6; }
+.node-label-score.best     { fill: var(--accent-mint); font-weight: 700; }
 
 .tree-node {
   margin-left: 24px;

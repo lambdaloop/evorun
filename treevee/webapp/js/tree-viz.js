@@ -3,19 +3,28 @@ const rootDiffCache = {};
 const stageColors = {
   root: '#f7c2e0',
   improve: '#d4b0e8',
-  fusion: '#b5e9cd',
+  fusion: '#a8e6e0',
   debug: '#f7d0c7',
   draft: '#c2d8f2',
 };
 
+const stageColorsDark = {
+  root:    '#5c1f3a',
+  improve: '#3a1f5c',
+  fusion:  '#1a3d42',
+  debug:   '#5c2a1a',
+  draft:   '#1a3358',
+};
+
 const defaultColor = '#d4b0e8';
+const defaultColorDark = '#3a1f5c';
 
 const stageEmojis = {
-  root: '\uD83C\uDF38',
-  improve: '\u2728',
-  fusion: '\uD83E\uDDEC',
-  debug: '\uD83D\uDCAC',
-  draft: '\uD83C\uDF1F',
+  root: '🌸',
+  improve: '✨',
+  fusion: '🧬',
+  debug: '💬',
+  draft: '🌟',
 };
 
 function getNodeColor(node) {
@@ -45,21 +54,6 @@ function buildTree(nodes) {
   return roots;
 }
 
-// Track expanded nodes across re-renders
-let expandedNodes = new Set();
-
-function toggleNode(nodeId) {
-  if (expandedNodes.has(nodeId)) {
-    expandedNodes.delete(nodeId);
-  } else {
-    expandedNodes.add(nodeId);
-  }
-}
-
-function isNodeExpanded(nodeId) {
-  return expandedNodes.has(nodeId);
-}
-
 function getBestPathNodeIds(bestNodeId, nodes) {
   const nodeMap = new Map();
   for (const n of nodes) nodeMap.set(n.id, n);
@@ -73,187 +67,33 @@ function getBestPathNodeIds(bestNodeId, nodes) {
   return path;
 }
 
-function createTreeNode(nodeData, allNodes, pathSet) {
-  const hasChildren = nodeData.children.length > 0;
-  const isBest = StateLoader.isBestNode(nodeData.id);
-  const onBestPath = pathSet ? pathSet.has(nodeData.id) : isBest;
-  const scoreReason = StateLoader.getScoreReason(nodeData);
-  const isActualError = nodeData.score === null && scoreReason && !scoreReason.startsWith('Baseline') && !scoreReason.startsWith('Score not parsed');
-
-  const wrapper = document.createElement('div');
-  wrapper.className = 'tree-node';
-
-  const header = document.createElement('div');
-  header.className = 'tree-node-header';
-  header.dataset.nodeId = nodeData.id;
-  if (onBestPath) header.classList.add('on-best-path');
-
-  const toggle = document.createElement('span');
-  toggle.className = 'tree-toggle';
-  toggle.textContent = hasChildren ? (isNodeExpanded(nodeData.id) ? '⌄' : '›') : '';
-
-  const dot = document.createElement('span');
-  dot.className = 'tree-dot';
-  dot.style.background = getNodeColor(nodeData);
-  dot.title = `${stageEmojis[nodeData.stage] || ''} ${nodeData.stage} · v${nodeData.visits}`;
-  if (isActualError) dot.style.boxShadow = '0 0 8px rgba(255, 183, 178, 0.5)';
-  if (onBestPath) dot.style.boxShadow = '0 0 8px rgba(168, 230, 207, 0.5)';
-
-  // Depth badge
-  const depthBadge = document.createElement('span');
-  depthBadge.className = 'tree-depth-badge';
-  depthBadge.textContent = `D${nodeData.depth}`;
-
-  // Root sparkle badge
-  let rootBadge = null;
-  if (nodeData.stage === 'root') {
-    rootBadge = document.createElement('span');
-    rootBadge.className = 'tree-depth-badge';
-    rootBadge.style.cssText = 'background:var(--accent-pink-dim);color:var(--accent-pink);';
-    rootBadge.textContent = '\uD83C\uDF38';
+function getOrCreateTooltip() {
+  let tt = document.getElementById('tree-node-tooltip');
+  if (!tt) {
+    tt = document.createElement('div');
+    tt.id = 'tree-node-tooltip';
+    tt.style.display = 'none';
+    document.body.appendChild(tt);
   }
-
-  // Compact label — just the short ID
-  const label = document.createElement('span');
-  label.className = 'tree-label';
-  const shortId = nodeData.id.slice(0, 8);
-  label.textContent = `[${shortId}]`;
-
-  const maximize = StateLoader.getMaximize();
-
-  // Score with direction-aware styling
-  const score = document.createElement('span');
-  score.className = 'tree-score';
-  const parent = allNodes.find((n) => n.id === nodeData.parent_id);
-  if (nodeData.score !== null) {
-    score.textContent = nodeData.score.toFixed(4);
-    if (onBestPath) {
-      score.style.color = 'var(--accent-mint)';
-    } else if (parent && parent.score !== null) {
-      const improved = maximize ? nodeData.score > parent.score : nodeData.score < parent.score;
-      const degraded = maximize ? nodeData.score < parent.score : nodeData.score > parent.score;
-      if (improved) {
-        score.classList.add('improved');
-      } else if (degraded) {
-        score.classList.add('degraded');
-      }
-    }
-  } else {
-    score.textContent = 'N/A';
-    score.classList.add('na');
-  }
-
-  // Score direction arrow (always shows raw numeric direction)
-  let arrowEl = null;
-  if (parent && nodeData.score !== null && parent.score !== null) {
-    const delta = nodeData.score - parent.score;
-    if (delta !== 0) {
-      const isGood = maximize ? delta > 0 : delta < 0;
-      arrowEl = document.createElement('span');
-      arrowEl.className = `tree-arrow ${isGood ? 'up' : 'down'}`;
-      arrowEl.textContent = delta > 0 ? '↑' : '↓';
-      arrowEl.title = `${delta > 0 ? '+' : ''}${delta.toFixed(4)}`;
-    }
-  }
-
-  // Error indicator — compact icon with tooltip
-  let errorEl = null;
-  if (isActualError) {
-    errorEl = document.createElement('span');
-    errorEl.className = 'tree-dot';
-    errorEl.style.cssText = 'width:8px;height:8px;border-radius:50%;background:var(--accent-peach);flex-shrink:0;cursor:default;box-shadow:0 0 6px rgba(255,183,178,0.5);';
-    errorEl.title = scoreReason;
-  }
-
-  // Best badge
-  let bestBadge = null;
-  if (isBest) {
-    bestBadge = document.createElement('span');
-    bestBadge.className = 'tree-depth-badge';
-    bestBadge.style.cssText = 'background:var(--accent-mint-dim);color:var(--accent-mint);';
-    bestBadge.textContent = '\u2B50';
-  }
-
-  // Child count badge
-  let childCountBadge = null;
-  if (hasChildren && !isNodeExpanded(nodeData.id)) {
-    childCountBadge = document.createElement('span');
-    childCountBadge.className = 'tree-child-count';
-    childCountBadge.textContent = `(${nodeData.children.length})`;
-  }
-
-  // Info button — opens node details panel
-  const infoBtn = document.createElement('span');
-  infoBtn.className = 'tree-info-btn';
-  infoBtn.textContent = 'ⓘ';
-  infoBtn.title = 'Show details';
-
-  header.appendChild(toggle);
-  header.appendChild(dot);
-
-  // Stage emoji
-  const stageEmoji = document.createElement('span');
-  stageEmoji.style.cssText = 'font-size:15px;flex-shrink:0;';
-  stageEmoji.textContent = stageEmojis[nodeData.stage] || '';
-  header.appendChild(stageEmoji);
-
-  header.appendChild(depthBadge);
-  if (rootBadge) header.appendChild(rootBadge);
-  header.appendChild(label);
-  header.appendChild(score);
-  if (arrowEl) header.appendChild(arrowEl);
- 
-  if (errorEl) header.appendChild(errorEl);
-  if (bestBadge) header.appendChild(bestBadge);
-  if (childCountBadge) header.appendChild(childCountBadge);
-  header.appendChild(infoBtn);
-
-  wrapper.appendChild(header);
-
-  // Children container
-  let childrenContainer = null;
-  if (hasChildren) {
-    childrenContainer = document.createElement('div');
-    childrenContainer.className = 'tree-children';
-    if (!isNodeExpanded(nodeData.id)) {
-      childrenContainer.classList.add('collapsed');
-    }
-
-    for (const child of nodeData.children) {
-      const childNode = createTreeNode(child, allNodes, pathSet);
-      childrenContainer.appendChild(childNode);
-    }
-
-    wrapper.appendChild(childrenContainer);
-  }
-
-  // Header click toggles expand/collapse only
-  header.addEventListener('click', (e) => {
-    if (hasChildren) {
-      e.stopPropagation();
-      toggleNode(nodeData.id);
-      const isCollapsed = childrenContainer.classList.toggle('collapsed');
-      toggle.textContent = isCollapsed ? '›' : '⌄';
-
-      // Update child count badge
-      if (childCountBadge) {
-        if (isCollapsed) {
-          childCountBadge.style.display = '';
-        } else {
-          childCountBadge.style.display = 'none';
-        }
-      }
-    }
-  });
-
-  // Info button opens node details panel
-  infoBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    showNodeDetailToBottom(nodeData);
-  });
-
-  return wrapper;
+  return tt;
 }
+
+function positionTooltip(tt, event) {
+  const pad = 14;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let x = event.clientX + pad;
+  let y = event.clientY + pad;
+  if (x + 260 > vw) x = event.clientX - 260 - pad;
+  if (y + tt.offsetHeight + pad > vh) y = event.clientY - tt.offsetHeight - pad;
+  tt.style.left = x + 'px';
+  tt.style.top  = y + 'px';
+}
+
+// D3 tree layout constants
+const NODE_W = 48;
+const NODE_H = 100;
+const MARGIN = { top: 30, right: 60, bottom: 40, left: 60 };
 
 function renderTree() {
   const nodes = StateLoader.getNodes();
@@ -266,15 +106,12 @@ function renderTree() {
   }
 
   const roots = buildTree(nodes);
-
   const bestNodeId = StateLoader.getBestNodeId();
   const pathSet = bestNodeId ? getBestPathNodeIds(bestNodeId, nodes) : new Set();
 
-  // Compact legend
+  // Legend
   const legend = document.createElement('div');
   legend.className = 'tree-legend';
-
-  // Score range
   const allScores = nodes.filter(n => n.score !== null).map(n => n.score);
   if (allScores.length > 0) {
     const rangeItem = document.createElement('div');
@@ -283,78 +120,251 @@ function renderTree() {
     rangeItem.textContent = `score ${Math.min(...allScores).toFixed(3)}–${Math.max(...allScores).toFixed(3)}`;
     legend.appendChild(rangeItem);
   }
-
-  const stages = [...new Set(nodes.map((n) => n.stage))];
+  const stages = [...new Set(nodes.map(n => n.stage))];
   for (const stage of stages) {
     const item = document.createElement('div');
     item.className = 'legend-item';
     const dot = document.createElement('span');
     dot.className = 'legend-dot';
     dot.style.background = getNodeColor({ stage });
-    dot.title = stage;
     item.appendChild(dot);
     const count = nodes.filter(n => n.stage === stage).length;
-    item.appendChild(document.createTextNode(`${stageEmojis[stage] || ''} ${stage}(${count})`));
+    item.appendChild(document.createTextNode(`${stageEmojis[stage] || ''} ${stage} (${count})`));
     legend.appendChild(item);
   }
-
   container.appendChild(legend);
 
-  for (const root of roots) {
-    const treeNode = createTreeNode(root, nodes, pathSet);
-    container.appendChild(treeNode);
+  // Wrap multiple roots under a hidden synthetic root if needed
+  let hierarchyData;
+  if (roots.length === 1) {
+    hierarchyData = roots[0];
+  } else {
+    hierarchyData = { id: '__synthetic__', stage: 'root', score: null, depth: -1, visits: 0, total_reward: 0, children: roots };
   }
-}
 
-function expandAll() {
-  const nodes = StateLoader.getNodes();
-  const nodeMap = new Map();
-  for (const n of nodes) {
-    nodeMap.set(n.id, { ...n, children: [] });
-  }
-  for (const n of nodes) {
-    const mapped = nodeMap.get(n.id);
-    if (n.parent_id != null) {
-      const parent = nodeMap.get(n.parent_id);
-      if (parent) parent.children.push(mapped);
-    }
-  }
-  for (const n of nodes) {
-    const mapped = nodeMap.get(n.id);
-    if (mapped.children.length > 0) {
-      expandedNodes.add(n.id);
-    }
-  }
-  renderTree();
-}
+  const root = d3.hierarchy(hierarchyData);
+  const treeLayout = d3.tree().nodeSize([NODE_W, NODE_H]);
+  treeLayout(root);
 
-function collapseAll() {
-  expandedNodes.clear();
-  renderTree();
+  // Compute bounds
+  let xMin = Infinity, xMax = -Infinity;
+  root.each(d => { xMin = Math.min(xMin, d.x); xMax = Math.max(xMax, d.x); });
+  const svgW = (xMax - xMin) + MARGIN.left + MARGIN.right;
+  const svgH = (root.height + 1) * NODE_H + MARGIN.top + MARGIN.bottom;
+
+  const svg = d3.select(container)
+    .append('svg')
+    .attr('class', 'tree-svg')
+    .attr('width', '100%')
+    .attr('height', '100%');
+
+  const zoomG = svg.append('g').attr('class', 'zoom-group');
+
+  const zoom = d3.zoom()
+    .scaleExtent([0.05, 4])
+    .on('zoom', (event) => zoomG.attr('transform', event.transform));
+
+  svg.call(zoom);
+
+  // Group offset so xMin maps to MARGIN.left
+  const g = zoomG.append('g')
+    .attr('transform', `translate(${-xMin + MARGIN.left},${MARGIN.top})`);
+
+  // Build position lookup for fusion lines
+  const posMap = new Map();
+  root.each(d => posMap.set(d.data.id, { x: d.x, y: d.y }));
+
+  // Links
+  const linkGen = d3.linkVertical().x(d => d.x).y(d => d.y);
+
+  g.append('g').attr('class', 'tree-links')
+    .selectAll('path')
+    .data(root.links())
+    .join('path')
+    .attr('class', d => {
+      const onPath = pathSet.has(d.source.data.id) && pathSet.has(d.target.data.id);
+      return 'tree-link' + (onPath ? ' on-best-path' : '');
+    })
+    .attr('d', linkGen);
+
+  // Fusion source lines (dotted, from fusion node back to each source node)
+  const fusionLinks = [];
+  root.each(d => {
+    if (d.data.stage === 'fusion' && d.data.fusion_source_ids?.length) {
+      for (const srcId of d.data.fusion_source_ids) {
+        const srcPos = posMap.get(srcId);
+        if (srcPos) fusionLinks.push({ source: srcPos, target: { x: d.x, y: d.y } });
+      }
+    }
+  });
+
+  g.append('g').attr('class', 'fusion-links')
+    .selectAll('line')
+    .data(fusionLinks)
+    .join('line')
+    .attr('class', 'fusion-link')
+    .attr('x1', d => d.source.x)
+    .attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x)
+    .attr('y2', d => d.target.y);
+
+  // Nodes
+  const maximize = StateLoader.getMaximize();
+
+  const nodeG = g.append('g').attr('class', 'tree-nodes')
+    .selectAll('g')
+    .data(root.descendants())
+    .join('g')
+    .attr('class', d => {
+      const classes = ['tree-node-svg'];
+      if (StateLoader.isBestNode(d.data.id)) classes.push('best-node');
+      if (pathSet.has(d.data.id)) classes.push('on-best-path');
+      return classes.join(' ');
+    })
+    .attr('transform', d => `translate(${d.x},${d.y})`)
+    .style('cursor', d => d.data.id === '__synthetic__' ? 'default' : 'pointer')
+    .on('click', (event, d) => {
+      if (d.data.id === '__synthetic__') return;
+      showNodeDetailToBottom(d.data);
+    });
+
+  // Background circle
+  nodeG.append('circle')
+    .attr('r', d => d.data.id === '__synthetic__' ? 0 : 20)
+    .attr('fill', d => d.data.id === '__synthetic__' ? 'none' : (stageColorsDark[d.data.stage] || defaultColorDark))
+    .attr('stroke', d => {
+      if (d.data.id === '__synthetic__') return 'none';
+      if (StateLoader.isBestNode(d.data.id)) return 'var(--accent-mint)';
+      if (pathSet.has(d.data.id)) return 'var(--accent-pink)';
+      const scoreReason = StateLoader.getScoreReason(d.data);
+      const isError = d.data.score === null && scoreReason &&
+        !scoreReason.startsWith('Baseline') && !scoreReason.startsWith('Score not parsed');
+      if (isError) return 'var(--accent-peach)';
+      return 'rgba(255,255,255,0.12)';
+    })
+    .attr('stroke-width', d => {
+      if (StateLoader.isBestNode(d.data.id) || pathSet.has(d.data.id)) return 2.5;
+      return 1.5;
+    });
+
+  // Emoji
+  nodeG.filter(d => d.data.id !== '__synthetic__')
+    .append('text')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'central')
+    .attr('class', 'node-emoji')
+    .text(d => stageEmojis[d.data.stage] || '✨');
+
+  // Step number
+  nodeG.filter(d => d.data.id !== '__synthetic__')
+    .append('text')
+    .attr('dy', 35)
+    .attr('text-anchor', 'middle')
+    .attr('class', 'node-label-id')
+    .text(d => d.data.stage === 'root' ? 'root' : `#${d.data.step}`);
+
+  // Score
+  nodeG.filter(d => d.data.id !== '__synthetic__')
+    .append('text')
+    .attr('dy', 50)
+    .attr('text-anchor', 'middle')
+    .attr('class', d => {
+      if (d.data.score === null) return 'node-label-score na';
+      if (StateLoader.isBestNode(d.data.id)) return 'node-label-score best';
+      const parentNode = nodes.find(n => n.id === d.data.parent_id);
+      if (parentNode && parentNode.score !== null) {
+        const improved = maximize ? d.data.score > parentNode.score : d.data.score < parentNode.score;
+        const degraded = maximize ? d.data.score < parentNode.score : d.data.score > parentNode.score;
+        if (improved) return 'node-label-score improved';
+        if (degraded) return 'node-label-score degraded';
+      }
+      return 'node-label-score';
+    })
+    .text(d => d.data.score != null ? d.data.score.toFixed(3) : 'N/A');
+
+  // Hover tooltip
+  const tooltip = getOrCreateTooltip();
+
+  nodeG.filter(d => d.data.id !== '__synthetic__')
+    .on('mouseenter', (event, d) => {
+      const parentNode = nodes.find(n => n.id === d.data.parent_id);
+      const histEntry = d.data.stage !== 'root' ? StateLoader.getHistoryEntryForStep(d.data.step) : null;
+
+      let deltaHtml = '';
+      if (d.data.score !== null && parentNode && parentNode.score !== null) {
+        const delta = d.data.score - parentNode.score;
+        const isGood = maximize ? delta > 0 : delta < 0;
+        const color = delta === 0 ? 'var(--text-muted)' : isGood ? 'var(--accent-mint)' : 'var(--accent-peach)';
+        const sign = delta > 0 ? '+' : '';
+        deltaHtml = `<div class="tt-delta" style="color:${color}">${sign}${delta.toFixed(4)}</div>`;
+      } else if (d.data.score !== null) {
+        deltaHtml = `<div class="tt-delta" style="color:var(--text-muted)">${d.data.score.toFixed(4)}</div>`;
+      } else {
+        deltaHtml = `<div class="tt-delta" style="color:var(--accent-peach)">N/A</div>`;
+      }
+
+      const summaryHtml = histEntry?.edit_summary
+        ? `<div class="tt-summary">${escapeHtml(histEntry.edit_summary)}</div>`
+        : '';
+
+      tooltip.innerHTML = `<div class="tt-header">${stageEmojis[d.data.stage] || ''} ${d.data.stage} #${d.data.step}</div>${deltaHtml}${summaryHtml}`;
+      tooltip.style.display = 'block';
+      positionTooltip(tooltip, event);
+    })
+    .on('mousemove', (event) => positionTooltip(tooltip, event))
+    .on('mouseleave', () => { tooltip.style.display = 'none'; });
+
+  // Stash for control buttons (fit is triggered by tab-switch handler)
+  container._d3zoom = zoom;
+  container._d3svg = svg;
+  container._svgW = svgW;
+  container._svgH = svgH;
 }
 
 function highlightTreeNode(nodeId) {
-  // Expand ancestors so the target node is visible.
-  const nodes = StateLoader.getNodes();
-  const nodeMap = new Map();
-  for (const n of nodes) nodeMap.set(n.id, n);
-  let needsRerender = false;
-  let cur = nodeMap.get(nodeId);
-  while (cur && cur.parent_id) {
-    if (!expandedNodes.has(cur.parent_id)) {
-      expandedNodes.add(cur.parent_id);
-      needsRerender = true;
-    }
-    cur = nodeMap.get(cur.parent_id);
-  }
-  if (needsRerender) renderTree();
+  d3.selectAll('.tree-node-svg').classed('active', false);
+  d3.selectAll('.tree-node-svg')
+    .filter(d => d.data && d.data.id === nodeId)
+    .classed('active', true);
+}
 
-  document.querySelectorAll('.tree-node-header.active').forEach((el) => el.classList.remove('active'));
-  const target = document.querySelector(`.tree-node-header[data-node-id="${nodeId}"]`);
-  if (target) {
-    target.classList.add('active');
-    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function applyFitHorizontal(container, animate) {
+  if (!container._d3zoom || !container._d3svg) return;
+  const cW = container.clientWidth || 800;
+  const scale = (cW / container._svgW) * 0.95;
+  const tx = (cW - container._svgW * scale) / 2;
+  const ty = MARGIN.top;
+  const t = d3.zoomIdentity.translate(tx, ty).scale(scale);
+  if (animate) {
+    container._d3svg.transition().duration(350).call(container._d3zoom.transform, t);
+  } else {
+    container._d3svg.call(container._d3zoom.transform, t);
   }
+}
+
+function initTreeControls() {
+  document.getElementById('fit-horizontal').addEventListener('click', () => {
+    applyFitHorizontal(document.getElementById('tree-container'), true);
+  });
+
+  document.getElementById('fit-vertical').addEventListener('click', () => {
+    const container = document.getElementById('tree-container');
+    if (!container._d3zoom || !container._d3svg) return;
+    const cH = container.clientHeight || 500;
+    const scale = (cH / container._svgH) * 0.95;
+    const cW = container.clientWidth || 800;
+    const tx = (cW - container._svgW * scale) / 2;
+    const ty = MARGIN.top;
+    container._d3svg.transition().duration(350)
+      .call(container._d3zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+  });
+
+  document.getElementById('reset-view').addEventListener('click', () => {
+    const container = document.getElementById('tree-container');
+    if (!container._d3zoom || !container._d3svg) return;
+    container._d3svg.transition().duration(350)
+      .call(container._d3zoom.transform, d3.zoomIdentity);
+  });
 }
 
 function showNodeDetailToBottom(nodeData) {
@@ -382,16 +392,16 @@ function showNodeDetailToBottom(nodeData) {
 
   // Status banners
   if (isBest) {
-    html += `<div style="background:var(--accent-mint-dim);border:1px solid rgba(168,230,207,0.3);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:12px;color:var(--accent-mint);font-weight:600;">\u2B50 Best node!</div>`;
+    html += `<div style="background:var(--accent-mint-dim);border:1px solid rgba(168,230,207,0.3);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:12px;color:var(--accent-mint);font-weight:600;">⭐ Best node!</div>`;
   }
 
   if (nodeData.score === null && scoreReason && !scoreReason.startsWith('Baseline')) {
-    html += `<div style="background:var(--accent-peach-dim);border:1px solid rgba(255,183,178,0.3);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:12px;color:var(--accent-peach);font-weight:600;">\u26A0 ${escapeHtml(scoreReason)}</div>`;
+    html += `<div style="background:var(--accent-peach-dim);border:1px solid rgba(255,183,178,0.3);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:12px;color:var(--accent-peach);font-weight:600;">⚠ ${escapeHtml(scoreReason)}</div>`;
   }
 
   // Score comparison with parent
-  const nodes = StateLoader.getNodesByStep();
-  const parent = nodes.find((n) => n.id === nodeData.parent_id);
+  const allNodes = StateLoader.getNodesByStep();
+  const parent = allNodes.find((n) => n.id === nodeData.parent_id);
   const maximize = StateLoader.getMaximize();
   if (parent && parent.score !== null && nodeData.score !== null) {
     const delta = nodeData.score - parent.score;
@@ -431,7 +441,6 @@ function showNodeDetailToBottom(nodeData) {
       if (historyEntry.files_deleted.length) html += detailRow('Deleted', historyEntry.files_deleted.join(', '));
       html += '</div>';
     }
-
   }
 
   // Eval output / Error output
@@ -452,7 +461,6 @@ function showNodeDetailToBottom(nodeData) {
     html += `<div style="background:${sectionBg};border:1px solid ${sectionBorder};border-radius:6px;padding:10px;margin-bottom:12px;">`;
     html += `<h4 style="color:${headerColor};margin-bottom:6px;font-size:15px;">${title}</h4>`;
 
-    // Show timeout/exec_time from history entry
     if (hasHistoryEntry) {
       const statusText = historyEntry.timed_out ? 'Timed out' : 'OK';
       const statusColor = historyEntry.timed_out ? 'var(--accent-peach)' : 'var(--text-muted)';
@@ -473,7 +481,7 @@ function showNodeDetailToBottom(nodeData) {
     html += '</div>';
   }
 
-  // Diff (with vs-parent / vs-root toggle)
+  // Diff
   html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
   html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
   html += '<h4 style="color:var(--accent-lavender);font-size:15px;margin:0;">Code Diff</h4>';
@@ -495,7 +503,6 @@ function showNodeDetailToBottom(nodeData) {
   html += '</div>';
 
   if (historyEntry) {
-    // Planner input
     if (historyEntry?.planner_input && historyEntry.planner_input.trim()) {
       const pInput = historyEntry.planner_input;
       const pInputLong = pInput.length > 600;
@@ -509,7 +516,6 @@ function showNodeDetailToBottom(nodeData) {
       html += '</div>';
     }
 
-    // Planner output
     if (historyEntry?.planner_output && historyEntry.planner_output.trim()) {
       const pOutput = historyEntry.planner_output;
       const pOutputLong = pOutput.length > 600;
@@ -523,7 +529,6 @@ function showNodeDetailToBottom(nodeData) {
       html += '</div>';
     }
 
-    // Editor input
     if (historyEntry?.editor_input && historyEntry.editor_input.trim()) {
       const eInput = historyEntry.editor_input;
       const eInputLong = eInput.length > 600;
@@ -537,7 +542,6 @@ function showNodeDetailToBottom(nodeData) {
       html += '</div>';
     }
 
-    // Editor output
     if (historyEntry?.editor_output && historyEntry.editor_output.trim()) {
       const eOutput = historyEntry.editor_output;
       const eOutputLong = eOutput.length > 600;
@@ -556,7 +560,7 @@ function showNodeDetailToBottom(nodeData) {
   diffSection.style.display = 'block';
   closeBtn.style.display = 'inline-block';
 
-  // Diff toggle (vs parent / vs root)
+  // Diff toggle
   const toggleParent = diffOutput.querySelector('#diff-toggle-parent');
   const toggleRoot = diffOutput.querySelector('#diff-toggle-root');
   if (toggleParent && toggleRoot) {
@@ -573,7 +577,7 @@ function showNodeDetailToBottom(nodeData) {
       if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
         diffContent.innerHTML = renderDiffHTML(historyEntry.diff_text);
       } else {
-        diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">No diff available (no history entry for this step).</p>';
+        diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">No diff available.</p>';
       }
     }
 
@@ -584,7 +588,7 @@ function showNodeDetailToBottom(nodeData) {
         diffContent.innerHTML = cached ? renderDiffHTML(cached) : '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">No changes from root.</p>';
         return;
       }
-      diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">Loading root diff\u2026</p>';
+      diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">Loading root diff…</p>';
       try {
         const res = await fetch(`/api/diff_from_root?node_id=${encodeURIComponent(nodeData.id)}`);
         const data = await res.json();
@@ -605,7 +609,6 @@ function showNodeDetailToBottom(nodeData) {
     toggleRoot.addEventListener('click', showRootDiff);
   }
 
-  // Handle expand button
   const expandBtn = diffOutput.querySelector('.expand-btn');
   if (expandBtn) {
     expandBtn.addEventListener('click', () => {
@@ -615,7 +618,6 @@ function showNodeDetailToBottom(nodeData) {
     });
   }
 
-  // Handle planner input expand button
   const pInputExpandBtn = diffOutput.querySelector('#planner-input-expand');
   if (pInputExpandBtn && historyEntry?.planner_input) {
     pInputExpandBtn.addEventListener('click', () => {
@@ -625,7 +627,6 @@ function showNodeDetailToBottom(nodeData) {
     });
   }
 
-  // Handle planner output expand button
   const pOutputExpandBtn = diffOutput.querySelector('#planner-output-expand');
   if (pOutputExpandBtn && historyEntry?.planner_output) {
     pOutputExpandBtn.addEventListener('click', () => {
@@ -635,7 +636,6 @@ function showNodeDetailToBottom(nodeData) {
     });
   }
 
-  // Handle editor input expand button
   const eInputExpandBtn = diffOutput.querySelector('#editor-input-expand');
   if (eInputExpandBtn && historyEntry?.editor_input) {
     eInputExpandBtn.addEventListener('click', () => {
@@ -645,7 +645,6 @@ function showNodeDetailToBottom(nodeData) {
     });
   }
 
-  // Handle editor output expand button
   const eOutputExpandBtn = diffOutput.querySelector('#editor-output-expand');
   if (eOutputExpandBtn && historyEntry?.editor_output) {
     eOutputExpandBtn.addEventListener('click', () => {
@@ -658,36 +657,4 @@ function showNodeDetailToBottom(nodeData) {
 
 function detailRow(label, value) {
   return `<div class="detail-row"><span class="detail-label">${label}:</span><span class="detail-value">${escapeHtml(String(value))}</span></div>`;
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function renderDiffInline(diffText) {
-  const lines = diffText.split('\n');
-  let html = '';
-
-  for (const line of lines) {
-    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
-      html += `<div class="diff-line header">${escapeHtml(line)}</div>`;
-    } else if (line.startsWith('@@')) {
-      html += `<div class="diff-line header">${escapeHtml(line)}</div>`;
-    } else if (line.startsWith('+') && line.length > 1) {
-      html += `<div class="diff-line added">${escapeHtml(line)}</div>`;
-    } else if (line.startsWith('-') && line.length > 1) {
-      html += `<div class="diff-line removed">${escapeHtml(line)}</div>`;
-    } else if (line.startsWith('\\')) {
-      // skip
-    } else {
-      html += `<div class="diff-line context">${escapeHtml(line)}</div>`;
-    }
-  }
-
-  return html;
-}
-
-function initTreeControls() {
-  document.getElementById('expand-all').addEventListener('click', expandAll);
-  document.getElementById('collapse-all').addEventListener('click', collapseAll);
 }

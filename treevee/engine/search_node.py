@@ -44,6 +44,7 @@ class SearchNode(DataClassJsonMixin):
     total_reward: float = field(default=0.0, kw_only=True)
     branch_id: Optional[int] = field(default=None, kw_only=True)
     eval_output: str = field(default="", kw_only=True)
+    fusion_source_ids: list = field(default_factory=list, kw_only=True)
 
     def __post_init__(self) -> None:
         if self.parent is not None:

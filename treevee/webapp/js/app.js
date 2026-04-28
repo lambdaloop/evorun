@@ -123,6 +123,10 @@ function initTabs() {
       if (btn.dataset.tab === 'chart' && typeof scoreChart !== 'undefined' && scoreChart) {
         scoreChart.resize();
       }
+      // Fit tree horizontally when switching to tree tab
+      if (btn.dataset.tab === 'tree') {
+        requestAnimationFrame(() => applyFitHorizontal(document.getElementById('tree-container'), false));
+      }
     });
   });
 }

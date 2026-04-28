@@ -223,13 +223,14 @@ const StateLoader = (() => {
     const path = getProgressionPath();
     const entries = [];
     for (const p of path) {
-      if (p.isRoot || (p.isImprovement && p.score !== null)) {
+      if (p.isRoot || p.score !== null) {
         entries.push({
           iter: p.isRoot ? -1 : p.iter,
           score: p.score,
           editSummary: p.editSummary,
           datetime: p.datetime,
           delta: p.delta,
+          isImprovement: p.isImprovement,
           isRoot: p.isRoot,
           nodeId: p.nodeId,
         });

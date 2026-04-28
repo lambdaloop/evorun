@@ -11,6 +11,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="lib/chartjs-adapter-date-fns.bundle.min.js"></script>
   <script src="lib/diff_match_patch.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 </head>
 <body>
   <div id="app">
@@ -51,8 +52,9 @@
         <section id="tree-panel">
           <h2>MCTS Tree</h2>
           <div class="tree-controls">
-            <button id="expand-all">Expand all</button>
-            <button id="collapse-all">Collapse all</button>
+            <button id="fit-horizontal">Fit horizontally</button>
+            <button id="fit-vertical">Fit vertically</button>
+            <button id="reset-view">Reset view</button>
           </div>
           <div id="tree-container"></div>
         </section>

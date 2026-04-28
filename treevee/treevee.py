@@ -1927,6 +1927,7 @@ Do not try to improve the score — just fix the errors.
         any_changes = False
         prev_hashes: dict[str, str] = {}
         used_fusion = False
+        fusion_source_ids: list[str] = []
 
         # Broken nodes skip fusion/improve — run dedicated error fix instead.
         is_broken = result.score is None
@@ -1940,7 +1941,7 @@ Do not try to improve the score — just fix the errors.
             if do_fusion:
                 # Try cross-branch fusion first
                 _run_logger.info(f"[Iter {self._iteration}] Trying cross-branch fusion...")
-                fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input = \
+                fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input, fusion_source_ids = \
                     self._run_fusion(target_node)
                 planner_output = fusion_plan
                 planner_input = fusion_planner_input
@@ -2232,6 +2233,7 @@ Do not try to improve the score — just fix the errors.
         child_node._term_out = child_output
         if used_fusion:
             child_node.stage = "fusion"
+            child_node.fusion_source_ids = fusion_source_ids
 
         _run_logger.info(f"[Iter {self._iteration}] Child created: "
                     f"node {child_node.id[:8]} with score={child_score}")
@@ -3153,7 +3155,8 @@ a messy combination of several.
         else:
             _run_logger.info("[Fusion] Fusion produced no changes — falling back to normal Claude")
 
-        return fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input
+        source_ids = [c.id for c in candidates] if used_fusion else []
+        return fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input, source_ids
 
     def _format_file_changes(self) -> list[str]:
         """Format file changes section if any files were modified/added/deleted.

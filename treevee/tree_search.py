@@ -203,7 +203,7 @@ class TreeSearch:
         depth_weight = max(2.3 - 0.3 * depth_of_node, 0.5)
         parent_visits: int = node.parent.visits if node.parent else 1
         exploration: float = self.explore_c * math.sqrt(
-            math.log(max(parent_visits, 1) + 1) / max(node.visits, 1)
+            math.log(max(parent_visits, 1) + 1) / (node.num_children + 1)
         ) * depth_weight
 
         # Broken node bonus — decays with visits so the node gets tried
@@ -445,6 +445,7 @@ class TreeSearch:
                 "eval_output": getattr(node, "eval_output", ""),
                 "visits": node.visits, "total_reward": node.total_reward,
                 "branch_id": node.branch_id, "step": node.step,
+                "fusion_source_ids": getattr(node, "fusion_source_ids", []),
             })
         depth: int = self._compute_depth(self.root)
         return {
