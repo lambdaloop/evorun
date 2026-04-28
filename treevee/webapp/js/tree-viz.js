@@ -90,10 +90,11 @@ function positionTooltip(tt, event) {
   tt.style.top  = y + 'px';
 }
 
-// D3 tree layout constants
-const NODE_W = 48;
-const NODE_H = 100;
-const MARGIN = { top: 30, right: 60, bottom: 40, left: 60 };
+// D3 tree layout constants — horizontal (left-to-right) layout
+// NODE_W = vertical gap between siblings; NODE_H = horizontal gap between depth levels
+const NODE_W = 62;
+const NODE_H = 120;
+const MARGIN = { top: 30, right: 80, bottom: 40, left: 80 };
 
 function renderTree() {
   const nodes = StateLoader.getNodes();
@@ -146,11 +147,11 @@ function renderTree() {
   const treeLayout = d3.tree().nodeSize([NODE_W, NODE_H]);
   treeLayout(root);
 
-  // Compute bounds
+  // Compute bounds — in horizontal layout d.x is sibling position (vertical on screen)
   let xMin = Infinity, xMax = -Infinity;
   root.each(d => { xMin = Math.min(xMin, d.x); xMax = Math.max(xMax, d.x); });
-  const svgW = (xMax - xMin) + MARGIN.left + MARGIN.right;
-  const svgH = (root.height + 1) * NODE_H + MARGIN.top + MARGIN.bottom;
+  const svgW = (root.height + 1) * NODE_H + MARGIN.left + MARGIN.right;
+  const svgH = (xMax - xMin) + MARGIN.top + MARGIN.bottom;
 
   const svg = d3.select(container)
     .append('svg')
@@ -166,16 +167,16 @@ function renderTree() {
 
   svg.call(zoom);
 
-  // Group offset so xMin maps to MARGIN.left
+  // Group offset: root (d.y=0) maps to MARGIN.left; xMin maps to MARGIN.top
   const g = zoomG.append('g')
-    .attr('transform', `translate(${-xMin + MARGIN.left},${MARGIN.top})`);
+    .attr('transform', `translate(${MARGIN.left},${-xMin + MARGIN.top})`);
 
   // Build position lookup for fusion lines
   const posMap = new Map();
   root.each(d => posMap.set(d.data.id, { x: d.x, y: d.y }));
 
-  // Links
-  const linkGen = d3.linkVertical().x(d => d.x).y(d => d.y);
+  // Links — horizontal layout: d.y is screen-x (depth), d.x is screen-y (sibling)
+  const linkGen = d3.linkHorizontal().x(d => d.y).y(d => d.x);
 
   g.append('g').attr('class', 'tree-links')
     .selectAll('path')
@@ -203,10 +204,10 @@ function renderTree() {
     .data(fusionLinks)
     .join('line')
     .attr('class', 'fusion-link')
-    .attr('x1', d => d.source.x)
-    .attr('y1', d => d.source.y)
-    .attr('x2', d => d.target.x)
-    .attr('y2', d => d.target.y);
+    .attr('x1', d => d.source.y)
+    .attr('y1', d => d.source.x)
+    .attr('x2', d => d.target.y)
+    .attr('y2', d => d.target.x);
 
   // Nodes
   const maximize = StateLoader.getMaximize();
@@ -221,7 +222,7 @@ function renderTree() {
       if (pathSet.has(d.data.id)) classes.push('on-best-path');
       return classes.join(' ');
     })
-    .attr('transform', d => `translate(${d.x},${d.y})`)
+    .attr('transform', d => `translate(${d.y},${d.x})`)
     .style('cursor', d => d.data.id === '__synthetic__' ? 'default' : 'pointer')
     .on('click', (event, d) => {
       if (d.data.id === '__synthetic__') return;
@@ -255,21 +256,14 @@ function renderTree() {
     .attr('class', 'node-emoji')
     .text(d => stageEmojis[d.data.stage] || '✨');
 
-  // Step number
+  // Score label — root shows score, others show delta from parent
   nodeG.filter(d => d.data.id !== '__synthetic__')
     .append('text')
     .attr('dy', 35)
     .attr('text-anchor', 'middle')
-    .attr('class', 'node-label-id')
-    .text(d => d.data.stage === 'root' ? 'root' : `#${d.data.step}`);
-
-  // Score
-  nodeG.filter(d => d.data.id !== '__synthetic__')
-    .append('text')
-    .attr('dy', 50)
-    .attr('text-anchor', 'middle')
     .attr('class', d => {
       if (d.data.score === null) return 'node-label-score na';
+      if (d.data.stage === 'root') return 'node-label-score';
       if (StateLoader.isBestNode(d.data.id)) return 'node-label-score best';
       const parentNode = nodes.find(n => n.id === d.data.parent_id);
       if (parentNode && parentNode.score !== null) {
@@ -280,7 +274,16 @@ function renderTree() {
       }
       return 'node-label-score';
     })
-    .text(d => d.data.score != null ? d.data.score.toFixed(3) : 'N/A');
+    .text(d => {
+      if (d.data.stage === 'root') return d.data.score != null ? d.data.score.toFixed(3) : 'N/A';
+      if (d.data.score === null) return 'N/A';
+      const parentNode = nodes.find(n => n.id === d.data.parent_id);
+      if (parentNode && parentNode.score !== null) {
+        const delta = d.data.score - parentNode.score;
+        return (delta > 0 ? '+' : '') + delta.toFixed(3);
+      }
+      return d.data.score.toFixed(3);
+    });
 
   // Hover tooltip
   const tooltip = getOrCreateTooltip();
@@ -290,24 +293,20 @@ function renderTree() {
       const parentNode = nodes.find(n => n.id === d.data.parent_id);
       const histEntry = d.data.stage !== 'root' ? StateLoader.getHistoryEntryForStep(d.data.step) : null;
 
-      let deltaHtml = '';
-      if (d.data.score !== null && parentNode && parentNode.score !== null) {
-        const delta = d.data.score - parentNode.score;
-        const isGood = maximize ? delta > 0 : delta < 0;
-        const color = delta === 0 ? 'var(--text-muted)' : isGood ? 'var(--accent-mint)' : 'var(--accent-peach)';
-        const sign = delta > 0 ? '+' : '';
-        deltaHtml = `<div class="tt-delta" style="color:${color}">${sign}${delta.toFixed(4)}</div>`;
-      } else if (d.data.score !== null) {
-        deltaHtml = `<div class="tt-delta" style="color:var(--text-muted)">${d.data.score.toFixed(4)}</div>`;
+      let scoreHtml = '';
+      if (d.data.score !== null) {
+        const isBest = StateLoader.isBestNode(d.data.id);
+        const color = isBest ? 'var(--accent-mint)' : 'var(--text-secondary)';
+        scoreHtml = `<div class="tt-delta" style="color:${color}">${d.data.score.toFixed(4)}</div>`;
       } else {
-        deltaHtml = `<div class="tt-delta" style="color:var(--accent-peach)">N/A</div>`;
+        scoreHtml = `<div class="tt-delta" style="color:var(--accent-peach)">N/A</div>`;
       }
 
       const summaryHtml = histEntry?.edit_summary
         ? `<div class="tt-summary">${escapeHtml(histEntry.edit_summary)}</div>`
         : '';
 
-      tooltip.innerHTML = `<div class="tt-header">${stageEmojis[d.data.stage] || ''} ${d.data.stage} #${d.data.step}</div>${deltaHtml}${summaryHtml}`;
+      tooltip.innerHTML = `<div class="tt-header">${stageEmojis[d.data.stage] || ''} ${d.data.stage} #${d.data.step}</div>${scoreHtml}${summaryHtml}`;
       tooltip.style.display = 'block';
       positionTooltip(tooltip, event);
     })
@@ -331,9 +330,11 @@ function highlightTreeNode(nodeId) {
 function applyFitHorizontal(container, animate) {
   if (!container._d3zoom || !container._d3svg) return;
   const cW = container.clientWidth || 800;
+  // Fit tree width (horizontal extent) to container width
   const scale = (cW / container._svgW) * 0.95;
   const tx = (cW - container._svgW * scale) / 2;
-  const ty = MARGIN.top;
+  const cH = container.clientHeight || 500;
+  const ty = (cH - container._svgH * scale) / 2;
   const t = d3.zoomIdentity.translate(tx, ty).scale(scale);
   if (animate) {
     container._d3svg.transition().duration(350).call(container._d3zoom.transform, t);
@@ -351,10 +352,11 @@ function initTreeControls() {
     const container = document.getElementById('tree-container');
     if (!container._d3zoom || !container._d3svg) return;
     const cH = container.clientHeight || 500;
+    // Fit tree height (vertical extent of siblings) to container height
     const scale = (cH / container._svgH) * 0.95;
     const cW = container.clientWidth || 800;
     const tx = (cW - container._svgW * scale) / 2;
-    const ty = MARGIN.top;
+    const ty = (cH - container._svgH * scale) / 2;
     container._d3svg.transition().duration(350)
       .call(container._d3zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
   });

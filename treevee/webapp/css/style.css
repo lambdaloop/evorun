@@ -271,7 +271,7 @@ section:hover h2 {
 }
 
 #tree-panel {
-  height: 85vh;
+  height: 75vh;
 }
 
 #tree-panel::before, #iterations-panel::before {
