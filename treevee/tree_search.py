@@ -477,6 +477,8 @@ class TreeSearch:
         self.root.id = data["root_id"]
         self.root.visits = root_data["visits"] if root_data else 0
         self.root.total_reward = root_data["total_reward"] if root_data else 0.0
+        if root_data:
+            self.root.metric = MetricValue(value=root_data["score"], maximize=self.maximize)
         self.journal.append(self.root)
 
         # Restore rewards stats.
