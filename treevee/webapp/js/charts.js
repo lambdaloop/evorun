@@ -450,12 +450,9 @@ const labelPlugin = {
     if (event.type === 'click') {
       // Label box click — show node details.
       if (labelHit !== null) {
-        const p = currentProgression[labelHit];
-        if (p && p.isRoot) {
-          const root = StateLoader.getNodes().find((n) => n.stage === 'root');
-          if (root && typeof showNodeDetailToBottom === 'function') showNodeDetailToBottom(root);
-        } else if (p) {
-          showNodeForIteration(p.iter);
+        const matchedLabel = _labelPositions[labelHit];
+        if (matchedLabel) {
+          showNodeForIteration(matchedLabel.iter);
         }
         return;
       }
