@@ -206,10 +206,6 @@ class TreeSearch:
             math.log(max(parent_visits, 1) + 1) / max(node.visits, 1)
         ) * depth_weight
 
-        # Cap exploration for visited nodes (visits > 1 means expanded at least once).
-        if node.visits > 1:
-            exploration = min(exploration, self.explore_c * 0.8)
-
         # Broken node bonus — decays with visits so the node gets tried
         # early but doesn't dominate long-term selection.
         if not node.metric or node.metric.value is None:

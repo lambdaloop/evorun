@@ -962,6 +962,7 @@ class EvoRunAgent:
         self._consecutive_no_changes: int = 0
 
         self.use_decay = getattr(args, 'decay_exploration', False)
+        self.explore_c_static = getattr(args, 'explore_c', 0.22)  # Static C when decay is disabled
         self.use_fusion = getattr(args, 'use_fusion', True)
         self.fusion_min_iters = getattr(args, 'fusion_min_iters', 10)
         self.fusion_prob = getattr(args, 'fusion_prob', 0.5)
@@ -1128,10 +1129,6 @@ class EvoRunAgent:
             return False, ""
         return self._is_duplicate_code(code), code
 
-    # ─── Early exit conditions ─────────────────────────────────────
-
-    # ─── Progressive UCT decay ─────────────────────────────────────
-
     def _get_decay_exploration_c(self) -> float:
         """Get the current exploration constant with progressive decay.
 
@@ -1142,15 +1139,15 @@ class EvoRunAgent:
             Current exploration constant value.
         """
         if not getattr(self, 'use_decay', False):
-            return 0.15  # Default static value
+            return self.explore_c_static  # Configurable static value
 
         elapsed = time.time() - self._start_time
         total_time = self.time_limit if self.time_limit > 0 else 1e9
         progress = min(elapsed / total_time, 1.0)
 
         # Piecewise decay: start high, decay to lower bound
-        start_c = 0.3
-        end_c = 0.05
+        start_c = 0.35  # Increased from 0.30 for stronger early exploration
+        end_c = 0.10    # Increased from 0.05 for more late-stage diversity
         decay_rate = 2.0  # Exponential decay rate
 
         # Apply exponential decay
@@ -3871,6 +3868,7 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "sandbox": True,
     "allow_network": True,
     "tmpdir": "/tmp",
+    "explore_c": 0.22,
 }
 
 # Mapping from config.toml keys to argparse destination names.
@@ -3892,6 +3890,7 @@ _CONFIG_TO_ARGPARSE: dict[str, str] = {
     "sandbox": "sandbox",
     "allow_network": "allow_network",
     "tmpdir": "tmpdir",
+    "explore_c": "explore_c",
 }
 
 
@@ -4014,6 +4013,12 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
         dest="decay_exploration",
         help="Disable progressive UCT exploration decay",
     )
+    subparser.add_argument(
+        "--explore-c",
+        type=float, default=0.22,
+        help="Static exploration constant when decay is disabled (default: 0.22)",
+    )
+
     subparser.add_argument(
         "--no-fusion",
         action="store_false",
