@@ -925,19 +925,28 @@ class EvoRunAgent:
         self.tree_max_children = getattr(args, 'max_children', 10)
         self.optim_mode = getattr(args, 'optim_mode', 'min')
         self.tree = TreeSearch(maximize=(self.optim_mode == "max"), max_children=self.tree_max_children)
+
+        # Config and timer must be set before _get_decay_exploration_c
+        self.use_decay = getattr(args, 'decay_exploration', False)
+        self.explore_c_static = getattr(args, 'explore_c', 0.22)  # Static C when decay is disabled
+        self.use_fusion = getattr(args, 'use_fusion', True)
+        self.fusion_min_iters = getattr(args, 'fusion_min_iters', 10)
+        self.fusion_prob = getattr(args, 'fusion_prob', 0.5)
+        self._start_time = time.time()
+
+        # Optimization parameters (must be set before _get_decay_exploration_c)
+        self.max_iters: int = args.max_iters
+        self.time_limit: float = args.time_limit
+        self.patience: int = args.patience
+        self.eval_timeout: int = args.eval_timeout
+        self.eval_timeout_chain_limit: int = 3
+
         self.tree.explore_c = self._get_decay_exploration_c()
 
         # Background thread pool for LLM summary generation
         self._summary_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._summary_future: concurrent.futures.Future | None = None
         self._summary_lock = threading.Lock()
-
-        # Optimization parameters
-        self.max_iters: int = args.max_iters
-        self.time_limit: float = args.time_limit
-        self.patience: int = args.patience
-        self.eval_timeout: int = args.eval_timeout
-        self.eval_timeout_chain_limit: int = 3
 
         self.best_score: float | None = None
         self._best_snapshot_dir: str | None = None
@@ -961,20 +970,12 @@ class EvoRunAgent:
         self._last_deleted_files: list[str] = []
         self._consecutive_no_changes: int = 0
 
-        self.use_decay = getattr(args, 'decay_exploration', False)
-        self.explore_c_static = getattr(args, 'explore_c', 0.22)  # Static C when decay is disabled
-        self.use_fusion = getattr(args, 'use_fusion', True)
-        self.fusion_min_iters = getattr(args, 'fusion_min_iters', 10)
-        self.fusion_prob = getattr(args, 'fusion_prob', 0.5)
 
         # Solution deduplication
         self._seen_code_hashes: set[str] = set()
 
         # Ensure .claude/settings.local.json blocks reads of .treevee/ files
         self._ensure_claude_settings()
-
-        # Start the wall-clock timer.
-        self._start_time = time.time()
 
         # Signal handler: exit immediately on Ctrl+C / SIGTERM.
         def _signal_handler(signum, frame) -> None:
