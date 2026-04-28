@@ -1152,14 +1152,12 @@ class EvoRunAgent:
             total_time = self.time_limit if self.time_limit > 0 else 1e9
             progress = min(elapsed / total_time, 1.0)
 
-        # Piecewise decay: start high, decay to lower bound
-        start_c = 0.35  # Increased from 0.30 for stronger early exploration
-        end_c = 0.10    # Increased from 0.05 for more late-stage diversity
-        decay_rate = 2.0  # Exponential decay rate
+        # Decay from user-set explore_c down to half of it.
+        start_c = self.explore_c_static
+        end_c = self.explore_c_static * 0.5
+        decay_rate = 2.0
 
-        # Apply exponential decay
         current_c = end_c + (start_c - end_c) * (1 - progress) ** decay_rate
-
         return max(current_c, end_c)
 
     # ─── Debug agent ─────────────────────────────────────
