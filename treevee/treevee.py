@@ -3859,7 +3859,7 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "eval_timeout": 300,
     "llm_retries": 9,
     "llm_retry_base_delay": 5.0,
-    "decay_exploration": True,
+    "decay_exploration": False,
     "eval_cmd": None,
     "use_fusion": True,
     "fusion_min_iters": 10,
@@ -4004,8 +4004,8 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--decay-exploration",
         action="store_true",
-        default=True,
-        help="Enable progressive UCT exploration decay over time (default: True)",
+        default=False,
+        help="Enable progressive UCT exploration decay over time (default: False)",
     )
     subparser.add_argument(
         "--no-decay",
@@ -4387,7 +4387,7 @@ def _cmd_init(args: argparse.Namespace) -> None:
             "patience = 10\n"
             "eval_timeout = 300\n"
             "max_children = 10\n"
-            "decay_exploration = true\n"
+            "decay_exploration = false\n"
             "use_fusion = true\n"
             "fusion_min_iters = 10\n"
             "fusion_prob = 0.5\n"
@@ -4539,7 +4539,7 @@ Key settings (all have defaults):
 | `eval_timeout` | 300 | Timeout per eval in seconds |
 | `max_children` | 10 | Max children per tree node |
 | `llm_retries` | 9 | Retries on LLM errors (triple backoff, ~4.6h cumulative) |
-| `decay_exploration` | true | Reduce exploration over time |
+| `decay_exploration` | false | Reduce exploration over time |
 | `use_fusion` | true | Enable cross-branch technique fusion |
 | `fusion_min_iters` | 10 | Min iters before fusion starts |
 | `fusion_prob` | 0.5 | Probability of fusion vs normal improvement |
