@@ -38,7 +38,7 @@ _DEFAULT_MAX_CHILDREN = 10
 # Default value chosen to keep exploration small so score ranking remains
 # the primary driver of node selection.  Root gets extra exploration
 # proportional to remaining child capacity so new branches are spawned early.
-_DEFAULT_EXPLORE_C = 0.15
+_DEFAULT_EXPLORE_C = 1.0
 
 # Sparsity bonus -- extra UCT boost given to nodes under their branch's
 # average visit count relative to the root.  This prevents the tree from
@@ -197,14 +197,10 @@ class TreeSearch:
         """
         mean_reward: float = node.total_reward / max(node.visits, 1)
 
-        # Standard UCT exploration, depth-weighted.
-        depth_of_node: int = self._node_depth(node)
-        # Shallow nodes get more exploration: root-child=1.8, depth2=1.3, depth3+=0.8
-        depth_weight = max(2.3 - 0.3 * depth_of_node, 0.5)
         parent_visits: int = node.parent.visits if node.parent else 1
         exploration: float = self.explore_c * math.sqrt(
             math.log(max(parent_visits, 1) + 1) / (node.num_children + 1)
-        ) * depth_weight
+        )
 
         # Broken node bonus — decays with visits so the node gets tried
         # early but doesn't dominate long-term selection.

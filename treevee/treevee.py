@@ -1142,9 +1142,15 @@ class EvoRunAgent:
         if not getattr(self, 'use_decay', False):
             return self.explore_c_static  # Configurable static value
 
-        elapsed = time.time() - self._start_time
-        total_time = self.time_limit if self.time_limit > 0 else 1e9
-        progress = min(elapsed / total_time, 1.0)
+        # Use iteration-based progress when max_iters is set (covers fake runs
+        # and real runs without a time limit); fall back to time-based otherwise.
+        if self.max_iters > 0:
+            iteration = getattr(self, '_iteration', 0)
+            progress = min(iteration / self.max_iters, 1.0)
+        else:
+            elapsed = time.time() - self._start_time
+            total_time = self.time_limit if self.time_limit > 0 else 1e9
+            progress = min(elapsed / total_time, 1.0)
 
         # Piecewise decay: start high, decay to lower bound
         start_c = 0.35  # Increased from 0.30 for stronger early exploration
@@ -1808,7 +1814,7 @@ Do not try to improve the score — just fix the errors.
 
         if need_baseline:
             if self.fake_run:
-                fake_score = self._generate_fake_score()
+                fake_score = self._generate_fake_score(parent_score=None, parent_node=None)
                 result = EvalResult(
                     score=fake_score, description=f"Fake score (iteration {self._iteration})",
                     timed_out=False, exec_time=0.05, output=[],
@@ -2123,18 +2129,9 @@ Do not try to improve the score — just fix the errors.
             not modified_files and not added_files and not deleted_files
         )
         if self.fake_run:
-            # Generate fake child score based on parent's score.
-            # Uniform random variation — unbiased for tree-search
-            # prototyping (avoid depth bias, Issue 13).
-            if parent_score is None:
-                child_score = None
-                _run_logger.info(f"[Iter {self._iteration}] Fake child score: "
-                             f"None (parent score is None)")
-            else:
-                delta = random.uniform(-FAKE_SCORE_DELTA_RANGE, FAKE_SCORE_DELTA_RANGE)
-                child_score = parent_score + delta
-                _run_logger.info(f"[Iter {self._iteration}] Fake child score: "
-                             f"{child_score:.4f}")
+            child_score = self._generate_fake_score(parent_score=parent_score, parent_node=target_node)
+            score_str = f"{child_score:.4f}" if child_score is not None else "None"
+            _run_logger.info(f"[Iter {self._iteration}] Fake child score: {score_str}")
         elif no_changes:
             _run_logger.info(f"[Iter {self._iteration}] No code changes — "
                          f"reusing parent score {parent_score}")
@@ -2396,16 +2393,62 @@ Do not try to improve the score — just fix the errors.
 
         return hints
 
-    def _generate_fake_score(self) -> float:
-        """Generate a fake score for the current node (fake-run only).
+    def _generate_fake_score(
+        self,
+        parent_score: float | None = None,
+        parent_node=None,
+    ) -> float | None:
+        """Structured fake score for fake-run mode.
 
-        Returns a uniform random score in [0, 1] so that tree-search
-        hyper-parameter tuning is not biased by artificial depth-correlation.
+        Each branch has a per-branch optimal (floor for min, ceiling for max)
+        sampled once at branch creation.  Scores are pulled toward that optimal
+        with diminishing returns, so improvement slows as the branch converges.
+        This makes exploration genuinely useful: a greedy algorithm locks onto
+        a mediocre branch while a more exploratory one finds a better optimum.
 
-        Returns:
-            Fake score in [0, 1] range.
+        Args:
+            parent_score: Score of the parent node.  None → root baseline.
+            parent_node:  The parent SearchNode (needed to resolve branch key).
         """
-        return random.uniform(0.0, 1.0)
+        maximize = (self.optim_mode == "max")
+        sign = 1.0 if maximize else -1.0
+
+        # Lazy-init branch optimal store.
+        if not hasattr(self, '_fake_branch_optimal'):
+            self._fake_branch_optimal: dict = {}
+
+        # --- root baseline (called once) ---
+        if parent_score is None:
+            return sign * random.gauss(0.40, 0.05)
+
+        # --- determine branch key ---
+        # Children of root start a new branch; deeper nodes inherit parent's.
+        if parent_node is not None and parent_node.parent is None:
+            # parent IS root → child will receive tree._next_branch_id
+            branch_key = self.tree._next_branch_id
+        elif parent_node is not None:
+            branch_key = parent_node.branch_id
+        else:
+            branch_key = None
+
+        # Sample per-branch optimal on first encounter.
+        # Mean 1.5 units better than start; SD=0.8 gives meaningful diversity.
+        # sign makes it directionally correct for both max and min.
+        if branch_key is not None and branch_key not in self._fake_branch_optimal:
+            self._fake_branch_optimal[branch_key] = sign * random.gauss(1.5, 0.8)
+
+        branch_opt = self._fake_branch_optimal.get(branch_key, sign * 1.5)
+
+        # ~10% chance of broken code.
+        if random.random() < 0.10:
+            return None
+
+        # Pull-toward-optimal: delta proportional to remaining gap → diminishing returns.
+        # pull_rate=0.08 → ~8 steps to close 50% of initial gap.
+        pull_rate = 0.08
+        gap = branch_opt - parent_score   # positive when improvement room remains
+        delta = random.gauss(pull_rate * gap, 0.09)
+        return parent_score + delta
 
     def save_state(self) -> None:
         """Save the current optimization state to disk.
