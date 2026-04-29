@@ -37,7 +37,7 @@ function renderIterations() {
 
     const emoji = document.createElement('span');
     emoji.className = 'iteration-emoji';
-    emoji.textContent = stageEmojis[node.stage] || '';
+    emoji.textContent = typeof getNodeEmoji === 'function' ? getNodeEmoji(node) : (stageEmojis[node.stage] || '');
     row.appendChild(emoji);
 
     const num = document.createElement('span');

@@ -27,6 +27,23 @@ const stageEmojis = {
   draft: '🌟',
 };
 
+const improveTierEmojis = {
+  1: '💫',
+  2: '🎀',
+  3: '🌈',
+};
+
+function getNodeEmoji(node) {
+  if (node.stage === 'improve') {
+    const histEntry = StateLoader.getHistoryEntryForStep(node.step);
+    const tier = histEntry?.tier;
+    if (tier && improveTierEmojis[tier]) {
+      return improveTierEmojis[tier];
+    }
+  }
+  return stageEmojis[node.stage] || '✨';
+}
+
 function getNodeColor(node) {
   return stageColors[node.stage] || defaultColor;
 }
@@ -130,7 +147,11 @@ function renderTree() {
     dot.style.background = getNodeColor({ stage });
     item.appendChild(dot);
     const count = nodes.filter(n => n.stage === stage).length;
-    item.appendChild(document.createTextNode(`${stageEmojis[stage] || ''} ${stage} (${count})`));
+    if (stage === 'improve') {
+      item.appendChild(document.createTextNode(`${improveTierEmojis[1]}T1 ${improveTierEmojis[2]}T2 ${improveTierEmojis[3]}T3 improve (${count})`));
+    } else {
+      item.appendChild(document.createTextNode(`${stageEmojis[stage] || ''} ${stage} (${count})`));
+    }
     legend.appendChild(item);
   }
   container.appendChild(legend);
@@ -255,7 +276,7 @@ function renderTree() {
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'central')
     .attr('class', 'node-emoji')
-    .text(d => stageEmojis[d.data.stage] || '✨');
+    .text(d => getNodeEmoji(d.data));
 
   // Score label — root shows score, others show delta from parent
   nodeG.filter(d => d.data.id !== '__synthetic__')
@@ -307,7 +328,7 @@ function renderTree() {
         ? `<div class="tt-summary">${escapeHtml(histEntry.edit_summary)}</div>`
         : '';
 
-      tooltip.innerHTML = `<div class="tt-header">${stageEmojis[d.data.stage] || ''} ${d.data.stage} #${d.data.step}</div>${scoreHtml}${summaryHtml}`;
+      tooltip.innerHTML = `<div class="tt-header">${getNodeEmoji(d.data)} ${d.data.stage} #${d.data.step}</div>${scoreHtml}${summaryHtml}`;
       tooltip.style.display = 'block';
       positionTooltip(tooltip, event);
     })
@@ -391,7 +412,7 @@ function showNodeDetailToBottom(nodeData) {
 
   // Header
   const completedStr = historyEntry && historyEntry.datetime ? (() => { try { return new Date(historyEntry.datetime).toLocaleString(); } catch { return historyEntry.datetime; } })() : '';
-  html += `<p style="color:var(--text-secondary); padding:8px 0; font-size:15px;"><strong>${stageEmojis[nodeData.stage] || ''} ${nodeData.stage} node [${shortId}]</strong> (Step ${nodeData.step})${completedStr ? ' <span style="color:var(--text-muted);font-size:15px;margin-left:8px;">' + escapeHtml(completedStr) + '</span>' : ''}</p>`;
+  html += `<p style="color:var(--text-secondary); padding:8px 0; font-size:15px;"><strong>${getNodeEmoji(nodeData)} ${nodeData.stage} node [${shortId}]</strong> (Step ${nodeData.step})${completedStr ? ' <span style="color:var(--text-muted);font-size:15px;margin-left:8px;">' + escapeHtml(completedStr) + '</span>' : ''}</p>`;
 
   // Status banners
   if (isBest) {
