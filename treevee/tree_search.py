@@ -45,6 +45,24 @@ _DEFAULT_EXPLORE_C = 1.0
 # collapsing onto 1-2 dominant branches.
 _SPARSITY_BONUS = 0.2
 
+# Widening pressure -- encourages nodes with many subtree visits but few
+# direct children to spawn additional siblings instead of letting the
+# search drill deeper.  Target children = sqrt(visits); pressure decays
+# as num_children approaches that target.  Visits-driven (not Q-driven):
+# upstream nodes naturally accumulate visits and so naturally need more
+# breadth, even when their mean_reward is moderate compared to a fresh
+# great descendant.
+_WIDENING_C = 0.5
+
+# Depth penalty -- subtracted from UCT for each level below the root.
+# Without this, a fresh deep-leaf great node (Q=1.0 percentile rank) and
+# a good upstream node both compete on Q, but the deep leaf usually
+# wins by a hair, and the search keeps drilling.  A small per-level
+# penalty tilts selection back toward shallower nodes so the great
+# upstream node gets revisited and spawns more siblings before the
+# search commits deeper.
+_DEPTH_PENALTY = 0.05
+
 
 class TreeSearch:
     """Lightweight MCTS for iterative LLM-driven optimization.
@@ -78,6 +96,8 @@ class TreeSearch:
         self.max_children = max_children
         self.explore_c = explore_c if explore_c is not None else _DEFAULT_EXPLORE_C
         self.sparsity_bonus = _SPARSITY_BONUS
+        self.widening_c = _WIDENING_C
+        self.depth_penalty = _DEPTH_PENALTY
 
         # Core search structures (reused from MLEvolve)
         self.journal = Journal()
@@ -198,7 +218,13 @@ class TreeSearch:
         mean_reward: float = node.total_reward / max(node.visits, 1)
 
         parent_visits: int = node.parent.visits if node.parent else 1
-        exploration: float = self.explore_c * math.sqrt(
+        # Q-weighted exploration (PUCT-style): a fresh node with num_children=0
+        # would otherwise dominate selection regardless of its score, since
+        # exploration ≈ √ln(parent_visits) ≫ Q's [0,1] range.  Scaling by
+        # mean_reward keeps high-Q nodes attractive for widening while
+        # preventing low-scoring fresh children from being preferred over
+        # their better-performing parent or siblings.
+        exploration: float = self.explore_c * mean_reward * math.sqrt(
             math.log(max(parent_visits, 1) + 1) / (node.num_children + 1)
         )
 
@@ -207,7 +233,20 @@ class TreeSearch:
         if not node.metric or node.metric.value is None:
             exploration += self.explore_c * 2.0 / max(node.visits, 1)
 
-        uct: float = mean_reward + exploration
+        # Widening pressure: target sqrt(visits) direct children, minus 1
+        # so a fresh leaf (visits=1, num_children=0) gets ZERO widening
+        # boost — otherwise we'd reward exactly the deep-leaf nodes we're
+        # trying to deprioritize.  Upstream nodes with visits >> 1 still
+        # accumulate strong widening pressure when they're under-widened.
+        widening_target: float = math.sqrt(max(node.visits, 1))
+        deficit: float = max(0.0, widening_target - node.num_children - 1)
+        widening: float = self.widening_c * deficit / (node.num_children + 1)
+
+        # Depth penalty: discourage drilling far below the root when
+        # equivalent-Q candidates exist higher up.
+        depth_pen: float = self.depth_penalty * self._node_depth(node)
+
+        uct: float = mean_reward + exploration + widening - depth_pen
 
         # Sparsity bonus for under-explored branches (root children only).
         # Log-scaled so a large imbalance doesn't overwhelm the UCT signal.
