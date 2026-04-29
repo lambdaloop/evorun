@@ -175,20 +175,8 @@ function renderTree() {
   const posMap = new Map();
   root.each(d => posMap.set(d.data.id, { x: d.x, y: d.y }));
 
-  // Links — horizontal layout: d.y is screen-x (depth), d.x is screen-y (sibling)
-  const linkGen = d3.linkHorizontal().x(d => d.y).y(d => d.x);
-
-  g.append('g').attr('class', 'tree-links')
-    .selectAll('path')
-    .data(root.links())
-    .join('path')
-    .attr('class', d => {
-      const onPath = pathSet.has(d.source.data.id) && pathSet.has(d.target.data.id);
-      return 'tree-link' + (onPath ? ' on-best-path' : '');
-    })
-    .attr('d', linkGen);
-
   // Fusion source lines (dotted, from fusion node back to each source node)
+  // Must be appended first so they render underneath tree links and nodes.
   const fusionLinks = [];
   root.each(d => {
     if (d.data.stage === 'fusion' && d.data.fusion_source_ids?.length) {
@@ -208,6 +196,19 @@ function renderTree() {
     .attr('y1', d => d.source.x)
     .attr('x2', d => d.target.y)
     .attr('y2', d => d.target.x);
+
+  // Links — horizontal layout: d.y is screen-x (depth), d.x is screen-y (sibling)
+  const linkGen = d3.linkHorizontal().x(d => d.y).y(d => d.x);
+
+  g.append('g').attr('class', 'tree-links')
+    .selectAll('path')
+    .data(root.links())
+    .join('path')
+    .attr('class', d => {
+      const onPath = pathSet.has(d.source.data.id) && pathSet.has(d.target.data.id);
+      return 'tree-link' + (onPath ? ' on-best-path' : '');
+    })
+    .attr('d', linkGen);
 
   // Nodes
   const maximize = StateLoader.getMaximize();

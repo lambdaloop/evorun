@@ -344,9 +344,9 @@ section:hover h2 {
 
 .tree-link {
   fill: none;
-  stroke: var(--border-light);
+  stroke: var(--text-muted);
   stroke-width: 1.5px;
-  stroke-opacity: 0.6;
+  stroke-opacity: 0.9;
 }
 
 .tree-link.on-best-path {
@@ -358,9 +358,9 @@ section:hover h2 {
 .fusion-link {
   fill: none;
   stroke: var(--accent-yellow);
-  stroke-width: 1.5px;
-  stroke-opacity: 0.6;
-  stroke-dasharray: 5 4;
+  stroke-width: 1px;
+  stroke-opacity: 0.2;
+  stroke-dasharray: 4 5;
 }
 
 .tree-node-svg {
