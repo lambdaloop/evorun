@@ -52,7 +52,7 @@ _SPARSITY_BONUS = 0.2
 # upstream nodes naturally accumulate visits and so naturally need more
 # breadth, even when their mean_reward is moderate compared to a fresh
 # great descendant.
-_WIDENING_C = 0.5
+_WIDENING_C = 0.3
 
 # Depth penalty -- subtracted from UCT for each level below the root.
 # Without this, a fresh deep-leaf great node (Q=1.0 percentile rank) and

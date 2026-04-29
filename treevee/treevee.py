@@ -2975,11 +2975,19 @@ Do not try to improve the score — just fix the errors.
     # ─── Fusion agent ───────────────────────────────────────────────
 
     def _find_fusion_candidates(self, target_node, max_candidates=2):
-        """Find diverse, high-scoring nodes from other branches as fusion candidates.
+        """Find high-scoring fusion candidates from outside target's grandparent
+        family and ancestor chain.
 
-        Picks the best-scoring node from each branch other than the target's,
-        ensuring cross-branch diversity. Falls back to any scored node if not
-        enough distinct branches exist.
+        A candidate is eligible iff it has a score AND:
+        1. Does NOT share a grandparent with the target (excludes the target
+           itself, its siblings, and its cousins).
+        2. Is NOT an ancestor of the target (excludes parent, grandparent, and
+           all nodes on the path to root). Ancestors are earlier snapshots of
+           the same lineage; fusing with them is regressive.
+
+        None-grandparent (root and depth-1 nodes) is treated as a shared
+        "no-grandparent" group, so depth-1 siblings cannot fuse with each
+        other. Target's own descendants remain eligible.
 
         Args:
             target_node: The SearchNode being expanded.
@@ -2988,42 +2996,36 @@ Do not try to improve the score — just fix the errors.
         Returns:
             List of SearchNode objects sorted by score descending.
         """
+        target_gp = target_node.parent.parent if target_node.parent else None
+
+        def shares_grandparent(node) -> bool:
+            node_gp = node.parent.parent if node.parent else None
+            return node_gp is target_gp
+
+        # Collect all ancestors (parent, grandparent, ..., root) by object id.
+        ancestors: set = set()
+        cur = target_node.parent
+        while cur is not None:
+            ancestors.add(id(cur))
+            cur = cur.parent
+
         eligible = [
             node for node in self.tree.journal.nodes
             if node.id != target_node.id
             and node is not self.tree.root
             and node.metric is not None
             and node.metric.value is not None
+            and not shares_grandparent(node)
+            and id(node) not in ancestors
         ]
         if not eligible:
             return []
 
-        target_branch = target_node.branch_id
         if self.tree.maximize:
             score_key = lambda n: n.metric.value  # noqa: E731
         else:
             score_key = lambda n: -n.metric.value  # noqa: E731
-        sorted_all = sorted(eligible, key=score_key, reverse=True)
-
-        # One best node per branch, preferring branches different from the target's.
-        branches_seen: set = set()
-        diverse: list = []
-        for node in sorted_all:
-            branch = node.branch_id
-            if branch != target_branch and branch not in branches_seen:
-                branches_seen.add(branch)
-                diverse.append(node)
-                if len(diverse) >= max_candidates:
-                    break
-
-        # Fill remaining slots from any branch if needed.
-        for node in sorted_all:
-            if node not in diverse:
-                diverse.append(node)
-                if len(diverse) >= max_candidates:
-                    break
-
-        return diverse
+        return sorted(eligible, key=score_key, reverse=True)[:max_candidates]
 
     def _run_fusion(self, target_node) -> tuple[str, str, list[str], list[str], list[str], bool]:
         """Run cross-branch fusion: merge techniques from other branches into the current node.
