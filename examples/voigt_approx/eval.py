@@ -74,7 +74,8 @@ def evaluate():
             return {"score": 0.0, "description": f"Wrong output shape: got {y_approx.shape}, expected {y_true.shape}"}
 
         mse = float(np.mean((y_approx - y_true) ** 2))
-        total_mse += mse
+        log_mse = math.log(mse) if mse > 0 else -math.inf
+        total_mse += log_mse
 
         # Timing
         t_ref = time_function(voigt_ground_truth, x_grid, sigma, gamma)
@@ -85,16 +86,16 @@ def evaluate():
         speed_ratio = t_ref / max(t_approx, 1e-12)
         details.append(f"s={sigma},g={gamma}: MSE={mse:.2e}, speed={speed_ratio:.2f}x")
 
-    avg_mse = total_mse / len(TEST_CASES)
+    avg_log_mse = total_mse / len(TEST_CASES)
     avg_ref_time_ms = (total_ref_time / len(TEST_CASES)) * 1000
     avg_approx_time_ms = (total_approx_time / len(TEST_CASES)) * 1000
 
     # Normalize both terms to [0, 1] range for balanced optimization
     speed_ratio = total_approx_time / max(total_ref_time, 1e-12)
-    score = (avg_mse / 0.01) + (speed_ratio / 10.0)
+    score = (avg_log_mse / abs(math.log(0.01))) + (speed_ratio / 10.0)
 
     description = (
-        f"MSE={avg_mse:.2e}, "
+        f"log(MSE)={avg_log_mse:.2f}, "
         f"ref={avg_ref_time_ms:.2f}ms, "
         f"approx={avg_approx_time_ms:.2f}ms, "
         f"speed={speed_ratio:.2f}x, "
