@@ -1,4 +1,33 @@
 const rootDiffCache = {};
+const nodeDetailCache = {};
+const historyDetailCache = {};
+let _nodeDetailToken = 0;
+
+async function fetchNodeDetail(nodeId) {
+  if (nodeDetailCache[nodeId] !== undefined) return nodeDetailCache[nodeId];
+  try {
+    const res = await fetch(`/api/node-detail?node_id=${encodeURIComponent(nodeId)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    nodeDetailCache[nodeId] = data;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchHistoryDetail(iter) {
+  if (historyDetailCache[iter] !== undefined) return historyDetailCache[iter];
+  try {
+    const res = await fetch(`/api/history-detail?iter=${iter}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    historyDetailCache[iter] = data;
+    return data;
+  } catch {
+    return null;
+  }
+}
 
 const stageColors = {
   root: '#f7c2e0',
@@ -391,7 +420,7 @@ function initTreeControls() {
   });
 }
 
-function showNodeDetailToBottom(nodeData) {
+async function showNodeDetailToBottom(nodeData) {
   const diffSection = document.getElementById('diff-section');
   const diffOutput = document.getElementById('diff-output');
   const closeBtn = document.getElementById('close-diff');
@@ -400,13 +429,47 @@ function showNodeDetailToBottom(nodeData) {
     return;
   }
 
+  const token = ++_nodeDetailToken;
   highlightTreeNode(nodeData.id);
 
   const shortId = nodeData.id.slice(0, 8);
   const isRoot = nodeData.stage === 'root';
-  const historyEntry = isRoot ? null : StateLoader.getHistoryEntryForStep(nodeData.step);
+  let historyEntry = isRoot ? null : StateLoader.getHistoryEntryForStep(nodeData.step);
   const scoreReason = StateLoader.getScoreReason(nodeData);
   const isBest = StateLoader.isBestNode(nodeData.id);
+
+  // Lazy-load eval_output and history details if stripped (Phase 1 optimization).
+  const fetches = [];
+  const evalNeedsFetch = !nodeData.eval_output || nodeData.eval_output.length < 100;
+  if (evalNeedsFetch) {
+    fetches.push(
+      fetchNodeDetail(nodeData.id).then(d => {
+        if (d && d.eval_output) nodeData.eval_output = d.eval_output;
+      })
+    );
+  }
+  if (!isRoot && historyEntry && !historyEntry.planner_input && !historyEntry.diff_text) {
+    fetches.push(
+      fetchHistoryDetail(nodeData.step).then(d => {
+        if (d) {
+          if (!historyEntry) historyEntry = d;
+          else Object.assign(historyEntry, d);
+        }
+      })
+    );
+  }
+
+  // Show loading indicator if we need to fetch data.
+  if (fetches.length > 0) {
+    diffOutput.innerHTML = '<p style="color:var(--text-muted);padding:20px;text-align:center;">Loading node details...</p>';
+    diffSection.style.display = 'block';
+    closeBtn.style.display = 'inline-block';
+  }
+
+  await Promise.all(fetches);
+
+  // Discard if a newer call superseded this one (race condition guard).
+  if (token !== _nodeDetailToken) return;
 
   let html = '';
 

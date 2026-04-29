@@ -1043,10 +1043,26 @@ class EvoRunAgent:
             return False
         # Parse history entries.
         self._history_start = data.get("next_iteration", 0)
+        history_dir = self.state_path.parent / "details" / "history"
         all_history = []
         for e in data.get("history", []):
+            # Load large text fields from detail files if stripped (Phase 3).
+            iter_id = e["iter"]
+            if history_dir.exists() and not e.get("diff_text"):
+                detail_path = history_dir / f"{iter_id}.json"
+                if detail_path.exists():
+                    try:
+                        detail = json.loads(detail_path.read_text(encoding="utf-8"))
+                        e["diff_text"] = detail.get("diff_text", "")
+                        e["planner_input"] = detail.get("planner_input", "")
+                        e["planner_output"] = detail.get("planner_output", "")
+                        e["editor_input"] = detail.get("editor_input", "")
+                        e["editor_output"] = detail.get("editor_output", "")
+                    except (OSError, json.JSONDecodeError):
+                        pass
+
             h = HistoryEntry(
-                iter=e["iter"], score=e.get("score"), timed_out=e.get("timed_out", False),
+                iter=iter_id, score=e.get("score"), timed_out=e.get("timed_out", False),
                 exec_time=e.get("exec_time", 0.0),
                 datetime=e.get("datetime", ""),
                 files_modified=e.get("files_modified", []),
@@ -1080,7 +1096,8 @@ class EvoRunAgent:
         # Restore tree search state.
         ts_data = data.get("tree_structure")
         if ts_data:
-            self.tree._restore_from_state(ts_data)
+            nodes_dir = str(self.state_path.parent / "details" / "nodes")
+            self.tree._restore_from_state(ts_data, details_dir=nodes_dir)
             _run_logger.info(
                 f"[State] Tree restored: {len(ts_data['nodes'])} nodes, "
                 f"max_depth={ts_data.get('max_depth', 0)}"
@@ -2485,7 +2502,11 @@ Do not try to improve the score — just fix the errors.
             - history (last 20 entries, truncated llm_response to 300 chars)
             - tree state (root_id, best_node_id, branch_stagnation,
                 branch_best, full tree_structure)
-       """
+
+        Large text fields (eval_output, planner_input, etc.) are written
+        to separate files under .treevee/details/ to keep state.json small
+        for quick webapp loading. See Phase 1 optimization.
+        """
         history_entries: list[dict[str, Any]] = []
         for e in self.history:
             history_entries.append({
@@ -2515,6 +2536,49 @@ Do not try to improve the score — just fix the errors.
         data["parent_stagnation"] = dict(self._parent_stagnation)
         # Full tree state.
         data["tree_structure"] = self.tree.get_tree_structure()
+
+        # ── Phase 3: Extract large text fields into detail files ──
+        details_dir = self.state_path.parent / "details"
+        nodes_dir = details_dir / "nodes"
+        history_dir = details_dir / "history"
+        nodes_dir.mkdir(parents=True, exist_ok=True)
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        def _write_json_atomic(path: Path, obj: Any) -> None:
+            fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(obj, fh, default=str)
+                os.replace(tmp, path)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+
+        # Write eval_output per node to details/nodes/{node_id}.json.
+        for node in data["tree_structure"].get("nodes", []):
+            eval_output = node.get("eval_output", "")
+            if eval_output:
+                node_path = nodes_dir / f"{node['id']}.json"
+                _write_json_atomic(node_path, {"eval_output": eval_output})
+                # Strip from main state.json — keep only first 500 chars for webapp error detection.
+                node["eval_output"] = eval_output[:500]
+
+        # Write large history text fields per entry to details/history/{iter}.json.
+        _large_hist_fields = frozenset([
+            "planner_input", "planner_output",
+            "editor_input", "editor_output", "diff_text",
+        ])
+        for entry in data["history"]:
+            detail = {f: entry.get(f, "") for f in _large_hist_fields}
+            if any(v for v in detail.values()):
+                entry_path = history_dir / f"{entry['iter']}.json"
+                _write_json_atomic(entry_path, detail)
+                # Strip from main state.json.
+                for f in _large_hist_fields:
+                    del entry[f]
 
         # Atomic write: dump to a temp file in the same directory, then
         # rename (os.replace is atomic on POSIX).  This prevents a crashed

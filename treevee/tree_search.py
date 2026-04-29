@@ -20,6 +20,7 @@ Key improvements over the original implementation:
 import bisect
 import logging
 import math
+from pathlib import Path
 from typing import Optional
 
 from treevee.engine.search_node import Journal, SearchNode
@@ -495,8 +496,14 @@ class TreeSearch:
             "nodes": nodes,
         }
 
-    def _restore_from_state(self, data: dict) -> None:
-        """Restore tree state from saved data (reverse of get_tree_structure)."""
+    def _restore_from_state(self, data: dict, details_dir: str | None = None) -> None:
+        """Restore tree state from saved data (reverse of get_tree_structure).
+
+        Args:
+            data: Tree structure dict from state.json.
+            details_dir: Optional path to .treevee/details/nodes/ for loading
+                full eval_output when it was trimmed from state.json (Phase 3).
+        """
         self.journal.nodes.clear()
         self.root.children.clear()
         self.root.parent = None
@@ -529,6 +536,7 @@ class TreeSearch:
             self._next_branch_id = max(self._next_branch_id, max_branch + 1)
 
         # Build node mapping and link parents.
+        import json as _json
         node_map: dict[str, SearchNode] = {}
         for nd in data["nodes"]:
             if nd["id"] == self.root.id:
@@ -540,7 +548,19 @@ class TreeSearch:
             node.total_reward = nd["total_reward"]
             node.branch_id = nd["branch_id"]
             node.step = nd["step"]
-            node.eval_output = nd.get("eval_output", "")
+
+            # Load full eval_output from detail file if trimmed.
+            eval_output = nd.get("eval_output", "")
+            if len(eval_output) <= 500 and details_dir:
+                detail_path = Path(details_dir) / f"{node.id}.json"
+                if detail_path.exists():
+                    try:
+                        detail = _json.loads(detail_path.read_text(encoding="utf-8"))
+                        eval_output = detail.get("eval_output", eval_output)
+                    except (OSError, _json.JSONDecodeError):
+                        pass
+            node.eval_output = eval_output
+
             node.metric = MetricValue(value=nd["score"], maximize=self.maximize)
             node_map[node.id] = node
             self.journal.append(node)
