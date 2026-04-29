@@ -131,6 +131,7 @@ class EvorunHandler(http.server.SimpleHTTPRequestHandler):
             light["tree_structure"]["nodes"] = [
                 {k: (v[:500] if k == "eval_output" and len(v) > 500 else v)
                  for k, v in n.items()}
+                | ({"_eval_output_truncated": True} if n.get("eval_output") and len(n["eval_output"]) > 500 else {})
                 for n in tree.get("nodes", [])
             ]
 

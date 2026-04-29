@@ -440,7 +440,7 @@ async function showNodeDetailToBottom(nodeData) {
 
   // Lazy-load eval_output and history details if stripped (Phase 1 optimization).
   const fetches = [];
-  const evalNeedsFetch = !nodeData.eval_output || nodeData.eval_output.length < 100;
+  const evalNeedsFetch = nodeData._eval_output_truncated;
   if (evalNeedsFetch) {
     fetches.push(
       fetchNodeDetail(nodeData.id).then(d => {
@@ -698,9 +698,17 @@ async function showNodeDetailToBottom(nodeData) {
 
   const expandBtn = diffOutput.querySelector('.expand-btn');
   if (expandBtn) {
-    expandBtn.addEventListener('click', () => {
+    expandBtn.addEventListener('click', async () => {
       const pre = diffOutput.querySelector('pre');
-      if (pre) pre.textContent = nodeData.eval_output;
+      if (!pre) return;
+      if (nodeData._eval_output_truncated) {
+        expandBtn.textContent = 'Loading...';
+        const detail = await fetchNodeDetail(nodeData.id);
+        if (detail && detail.eval_output) {
+          nodeData.eval_output = detail.eval_output;
+        }
+      }
+      pre.textContent = nodeData.eval_output;
       expandBtn.style.display = 'none';
     });
   }
