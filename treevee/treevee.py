@@ -83,13 +83,20 @@ SPEED_WARNING_THRESHOLD = 0.7
 # Stagnation / no-change detection.
 MAX_CONSECUTIVE_NO_CHANGES = 3
 
-# Planner tier probabilities (must sum to 1.0).
+# Planner tier probabilities — depth-dependent.
 # Tier 1: small tweaks (hyperparameters, seeds, thresholds)
 # Tier 2: component changes (swap loss/backbone, add regularization, feature engineering)
 # Tier 3: paradigm shift (new algorithm, architectural rewrite, ensemble, GBDT<->NN)
-TIER_1_PROB = 0.50
-TIER_2_PROB = 0.30
-TIER_3_PROB = 0.20
+#
+# Shallow nodes (near the root) favor Tier 2/3 — they're exploring distinct
+# top-level approaches.  Deep nodes favor Tier 1 — they've found a working
+# approach upstream and should refine it rather than abandon it.  Probabilities
+# are linearly interpolated between the root and deep endpoints; depth >=
+# TIER_DEPTH_THRESHOLD uses the deep endpoint.  Each triple is (T1, T2, T3)
+# and must sum to 1.0.
+TIER_PROBS_AT_ROOT: tuple[float, float, float] = (0.20, 0.40, 0.40)
+TIER_PROBS_AT_DEEP: tuple[float, float, float] = (0.80, 0.15, 0.05)
+TIER_DEPTH_THRESHOLD = 5
 
 # Stagnation threshold: after N consecutive non-improvements on a branch,
 # force Tier 2 or 3 (skip Tier 1).
@@ -1247,11 +1254,16 @@ class EvoRunAgent:
         needs_fix = len(review_notes) > 0
         return needs_fix, "\n".join(review_notes)
 
-    def _select_planner_tier(self, target_node_id: str) -> int:
-        """Select planner tier based on stagnation and probabilities.
+    def _select_planner_tier(self, target_node_id: str, depth: int = 0) -> int:
+        """Select planner tier based on stagnation, depth, and probabilities.
 
-        If the target branch has stagnated for STAGNATION_TIER_ESCALATE or more
-        consecutive non-improvements, force Tier 2 or 3 (skip small tweaks).
+        Probabilities depend on node depth: shallow nodes favor Tier 2/3
+        (exploring distinct approaches), deep nodes favor Tier 1 (refining
+        a working approach).  See TIER_PROBS_AT_ROOT / TIER_PROBS_AT_DEEP.
+
+        If the target branch has stagnated for STAGNATION_TIER_ESCALATE or
+        more consecutive non-improvements, force Tier 2 or 3 (skip small
+        tweaks) regardless of depth.
 
         Returns:
             Integer 1 (tuning), 2 (components), or 3 (paradigm shift).
@@ -1263,18 +1275,24 @@ class EvoRunAgent:
                 f"[Iter {self._iteration}] Stagnation={stagnation} >= "
                 f"{STAGNATION_TIER_ESCALATE} — forced Tier {tier}"
             )
+            return tier
+
+        # Linearly interpolate tier probabilities by depth.
+        f = min(1.0, depth / TIER_DEPTH_THRESHOLD)
+        p1 = TIER_PROBS_AT_ROOT[0] + f * (TIER_PROBS_AT_DEEP[0] - TIER_PROBS_AT_ROOT[0])
+        p2 = TIER_PROBS_AT_ROOT[1] + f * (TIER_PROBS_AT_DEEP[1] - TIER_PROBS_AT_ROOT[1])
+
+        r = random.random()
+        if r < p1:
+            tier = 1
+        elif r < p1 + p2:
+            tier = 2
         else:
-            r = random.random()
-            if r < TIER_1_PROB:
-                tier = 1
-            elif r < TIER_1_PROB + TIER_2_PROB:
-                tier = 2
-            else:
-                tier = 3
-            _run_logger.info(
-                f"[Iter {self._iteration}] Stagnation={stagnation} — "
-                f"sampled Tier {tier}"
-            )
+            tier = 3
+        _run_logger.info(
+            f"[Iter {self._iteration}] Stagnation={stagnation}, depth={depth} "
+            f"(p1={p1:.2f}, p2={p2:.2f}) — sampled Tier {tier}"
+        )
         return tier
 
     def _run_planner(self, feedback: str, tier: int = 1) -> tuple[str, str]:
@@ -1318,6 +1336,11 @@ class EvoRunAgent:
             "\n"
             "You have limited turns — be direct and focused. Do not enumerate multiple\n"
             "alternatives or discuss trade-offs. Pick the single best approach and commit.\n"
+            "\n"
+            "ONE CHANGE ONLY: your plan must propose EXACTLY ONE change.  The tree\n"
+            "search will compose multiple changes across iterations — your job here\n"
+            "is to isolate a single hypothesis so its effect can be measured cleanly.\n"
+            "Do not bundle related tweaks; do not propose 'and also'.  One change.\n"
         )
 
         if tier == 1:
@@ -1333,7 +1356,7 @@ class EvoRunAgent:
                 "\n"
                 "**Diagnosis**: What parameter/training issue is limiting performance?\n"
                 "\n"
-                "**Proposed Change** (1 change): single, focused tuning adjustment\n"
+                "**Proposed Change** (exactly 1): a single, focused tuning adjustment\n"
             )
         elif tier == 2:
             tier_header = (
@@ -1349,7 +1372,7 @@ class EvoRunAgent:
                 "\n"
                 "**Diagnosis**: Is the model underfitting, overfitting, or misaligned with data?\n"
                 "\n"
-                "**Proposed Changes** (1-2 changes): what component(s) to change and why\n"
+                "**Proposed Change** (exactly 1): which single component to change and why\n"
             )
         else:  # tier == 3
             tier_header = (
@@ -1367,9 +1390,11 @@ class EvoRunAgent:
                 "\n"
                 "**Assessment**: What systemic limitation makes the current approach hit a ceiling?\n"
                 "\n"
-                "**Proposed Architecture**: What new approach/paradigm should replace it?\n"
-                "\n"
-                "**Migration Strategy**: Which files change structure, what new modules are needed?\n"
+                "**Proposed Paradigm Shift** (exactly 1): the single new approach that replaces\n"
+                "the current one.  Describe the new paradigm and which files restructure to\n"
+                "implement it.  This is one change in spirit (the paradigm) even though it\n"
+                "may touch multiple files.  Do not stack a paradigm shift with unrelated\n"
+                "tuning or component swaps.\n"
             )
 
         planner_prompt = f"""\
@@ -1990,7 +2015,9 @@ Do not try to improve the score — just fix the errors.
                     self.codebase.get_experiment_files(),
                 )
 
-                tier = self._select_planner_tier(target_node.id)
+                tier = self._select_planner_tier(
+                    target_node.id, depth=self.tree._node_depth(target_node)
+                )
                 _run_logger.info(f"[Iter {self._iteration}] Planner tier: {tier}")
                 planner_input, plan = self._run_planner(feedback, tier=tier)
                 planner_output = plan
