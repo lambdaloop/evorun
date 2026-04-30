@@ -1,3 +1,6 @@
+
+![treevee logo](./logo.png)
+
 # treevee 
 
 Optimize anything with a scoring function, tree search, and large language models. 
