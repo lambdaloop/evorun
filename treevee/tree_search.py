@@ -484,10 +484,26 @@ class TreeSearch:
                 "fusion_source_ids": getattr(node, "fusion_source_ids", []),
             })
         depth: int = self._compute_depth(self.root)
+
+        # Determine true best: the root may be better than _best_node
+        # (which only tracks children from expand_node).
+        root_score = self.root.metric.value if self.root.metric else None
+        best_node_id: str | None = self._best_node.id if self._best_node else None
+        best_score: float | None = (self._best_score if self._best_score != float("inf") else None)
+
+        if root_score is not None and best_score is not None:
+            root_is_better = root_score > best_score if self.maximize else root_score < best_score
+            if root_is_better:
+                best_node_id = self.root.id
+                best_score = root_score
+        elif root_score is not None and best_node_id is None:
+            best_node_id = self.root.id
+            best_score = root_score
+
         return {
             "root_id": self.root.id,
-            "best_node_id": self._best_node.id if self._best_node else None,
-            "best_score": (self._best_score if self._best_score != float("inf") else None),
+            "best_node_id": best_node_id,
+            "best_score": best_score,
             "maximize": self.maximize, "explore_c": self.explore_c,
             "total_nodes": self.total_nodes,
             "total_expansions": self.total_expansions, "max_depth": depth,

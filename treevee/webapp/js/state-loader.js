@@ -58,8 +58,6 @@ const StateLoader = (() => {
    * Get the best node ID from the tree (fallback when snapshot doesn't match).
    */
   function getBestNodeId() {
-    const tree = state?.tree_structure;
-    if (tree?.best_node_id) return tree.best_node_id;
     const nodes = getNodes();
     const maximize = getMaximize();
     let best = null;
