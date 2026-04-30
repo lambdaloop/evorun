@@ -121,6 +121,20 @@ class TreeSearch:
     # Scoring normalization
     # ------------------------------------------------------------------
 
+    def _reward_from_score(self, raw_score: float | None) -> float:
+        """Look up normalized reward for a raw score against the current _scores list.
+
+        Read-only: does not insert into _scores. Used when recomputing rewards
+        after restore, where _scores is already fully populated.
+        """
+        if raw_score is None or math.isnan(raw_score):
+            return 0.0
+        if len(self._scores) <= 1:
+            return 0.5
+        idx = bisect.bisect_left(self._scores, raw_score)
+        rank = idx / (len(self._scores) - 1)
+        return rank if self.maximize else 1.0 - rank
+
     def _normalize_reward(self, raw_score: float | None) -> float:
         """Convert raw score to normalized reward using percentile rank.
 
@@ -180,7 +194,7 @@ class TreeSearch:
             # No node can expand more -- pick highest-Q node overall.
             return max(
                 self.journal.nodes,
-                key=lambda n: n.total_reward / max(n.visits, 1),
+                key=lambda n: n.total_reward,
             )
 
         # Score each candidate.
@@ -216,7 +230,8 @@ class TreeSearch:
         All nodes are scored the same way: mean reward + depth-weighted
         exploration bonus, with sparsity bonus for under-explored branches.
         """
-        mean_reward: float = node.total_reward / max(node.visits, 1)
+        # With max-backprop, total_reward IS the best reward in the subtree.
+        mean_reward: float = node.total_reward
 
         parent_visits: int = node.parent.visits if node.parent else 1
         # Q-weighted exploration (PUCT-style): a fresh node with num_children=0
@@ -358,15 +373,40 @@ class TreeSearch:
 
         return child
 
+    def _recompute_total_rewards(self) -> None:
+        """Recompute total_reward for every node using max-backpropagation.
+
+        Called after _restore_from_state so that rewards saved under the old
+        sum-based formula are replaced with correct max-subtree values.
+        Traverses the tree post-order (leaves first) so each parent sees its
+        children's already-updated total_reward.
+        """
+        def _visit(node: SearchNode) -> None:
+            for child in node.children:
+                _visit(child)
+            own = self._reward_from_score(node.metric.value if node.metric else None)
+            if node.children:
+                node.total_reward = max(own, max(c.total_reward for c in node.children))
+            else:
+                node.total_reward = own
+
+        _visit(self.root)
+
     def _backpropagate(self, node: SearchNode, reward: float) -> None:
         """Propagate reward up the tree (child -> parent -> ... -> root).
 
-        Each ancestor increments its visits and adds the normalized reward.
+        Uses max-backpropagation: each ancestor's total_reward tracks the best
+        normalized reward seen anywhere in its subtree. A low-scoring child
+        cannot reduce a good parent's Q value.
+
+        Normalized rewards are always in [0, 1] with higher = better regardless
+        of maximize/minimize mode, so we always take the max here.
         """
         current = node
         while current is not None:
             current.visits += 1
-            current.total_reward += reward
+            if reward > current.total_reward:
+                current.total_reward = reward
             current = current.parent
 
     # ------------------------------------------------------------------
@@ -595,6 +635,10 @@ class TreeSearch:
                 raise ValueError(f"Unknown parent {parent_id} in tree restoration")
             node.parent = parent
             parent.children.add(node)
+
+        # Recompute total_reward under max-backpropagation semantics.
+        # The saved values were computed with the old sum formula and are stale.
+        self._recompute_total_rewards()
 
         # Restore best node.
         best_id = data.get("best_node_id")
