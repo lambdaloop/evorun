@@ -213,6 +213,13 @@ function renderTree() {
 
   const zoom = d3.zoom()
     .scaleExtent([0.05, 4])
+    // Ctrl+wheel zooms in/out; plain wheel scrolls the page.
+    // Keep click-drag panning; disable double-click zoom.
+    .filter((event) => {
+      if (event.type === 'wheel') return event.ctrlKey;
+      if (event.type === 'dblclick') return false;
+      return true;
+    })
     .on('zoom', (event) => zoomG.attr('transform', event.transform));
 
   svg.call(zoom);
@@ -395,15 +402,27 @@ function applyFitHorizontal(container, animate) {
 }
 
 function initTreeControls() {
+  const container = document.getElementById('tree-container');
+
+  document.getElementById('zoom-in').addEventListener('click', () => {
+    if (!container._d3zoom || !container._d3svg) return;
+    container._d3svg.transition().duration(200)
+      .call(container._d3zoom.scaleBy, 1.4);
+  });
+
+  document.getElementById('zoom-out').addEventListener('click', () => {
+    if (!container._d3zoom || !container._d3svg) return;
+    container._d3svg.transition().duration(200)
+      .call(container._d3zoom.scaleBy, 1 / 1.4);
+  });
+
   document.getElementById('fit-horizontal').addEventListener('click', () => {
-    applyFitHorizontal(document.getElementById('tree-container'), true);
+    applyFitHorizontal(container, true);
   });
 
   document.getElementById('fit-vertical').addEventListener('click', () => {
-    const container = document.getElementById('tree-container');
     if (!container._d3zoom || !container._d3svg) return;
     const cH = container.clientHeight || 500;
-    // Fit tree height (vertical extent of siblings) to container height
     const scale = (cH / container._svgH) * 0.95;
     const cW = container.clientWidth || 800;
     const tx = (cW - container._svgW * scale) / 2;
@@ -413,7 +432,6 @@ function initTreeControls() {
   });
 
   document.getElementById('reset-view').addEventListener('click', () => {
-    const container = document.getElementById('tree-container');
     if (!container._d3zoom || !container._d3svg) return;
     container._d3svg.transition().duration(350)
       .call(container._d3zoom.transform, d3.zoomIdentity);
