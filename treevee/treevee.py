@@ -2565,6 +2565,7 @@ Do not try to improve the score — just fix the errors.
                 _write_json_atomic(node_path, {"eval_output": eval_output})
                 # Strip from main state.json — keep only first 500 chars for webapp error detection.
                 node["eval_output"] = eval_output[:500]
+                node["_eval_output_truncated"] = True
 
         # Write large history text fields per entry to details/history/{iter}.json.
         _large_hist_fields = frozenset([
