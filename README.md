@@ -1,5 +1,5 @@
 
-![treevee logo](./logo.png)
+![treevee logo](./logo.png | height=200)
 
 # treevee 
 
