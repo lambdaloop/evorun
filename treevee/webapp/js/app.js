@@ -11,10 +11,33 @@ function renderSummary() {
   }
 }
 
+function renderIterationsLegend(container) {
+  const legend = document.createElement('div');
+  legend.className = 'iterations-legend';
+  const items = [
+    { emoji: '🌸', label: 'Root' },
+    { emoji: '💫', label: 'Improve T1' },
+    { emoji: '🎀', label: 'Improve T2' },
+    { emoji: '🌈', label: 'Improve T3' },
+    { emoji: '🐛', label: 'Debug / Fix' },
+    { emoji: '🧬', label: 'Fusion' },
+    { emoji: '💥', label: 'Error' },
+  ];
+  for (const { emoji, label } of items) {
+    const span = document.createElement('span');
+    span.className = 'legend-tag';
+    span.textContent = `${emoji} ${label}`;
+    legend.appendChild(span);
+  }
+  container.appendChild(legend);
+}
+
 function renderIterations() {
   const nodes = StateLoader.getNodesByStep();
   const container = document.getElementById('iterations-list');
   container.innerHTML = '';
+
+  renderIterationsLegend(container);
 
   const reversed = [...nodes].reverse();
 
@@ -106,28 +129,45 @@ function getBestIterFromSnapshot(snapshotName, nodes) {
   return entry ? entry.iter : null;
 }
 
+function activateTab(tabName) {
+  const buttons = document.querySelectorAll('.tab-btn');
+  buttons.forEach((b) => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+
+  const btn = Array.from(buttons).find((b) => b.dataset.tab === tabName);
+  if (!btn) return;
+  btn.classList.add('active');
+  const panel = document.getElementById('tab-' + tabName);
+  if (panel) panel.classList.add('active');
+
+  if (tabName === 'chart' && typeof scoreChart !== 'undefined' && scoreChart) {
+    scoreChart.resize();
+  }
+  if (tabName === 'tree') {
+    requestAnimationFrame(() => applyFitHorizontal(document.getElementById('tree-container'), false));
+  }
+}
+
 function initTabs() {
   const buttons = document.querySelectorAll('.tab-btn');
+
+  const hashTab = location.hash.replace('#', '');
+  if (hashTab && Array.from(buttons).some((b) => b.dataset.tab === hashTab)) {
+    activateTab(hashTab);
+  }
+
   buttons.forEach((btn) => {
     btn.addEventListener('click', () => {
-      // Deactivate all tabs
-      buttons.forEach((b) => b.classList.remove('active'));
-      document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
-
-      // Activate clicked tab
-      btn.classList.add('active');
-      const panel = document.getElementById('tab-' + btn.dataset.tab);
-      if (panel) panel.classList.add('active');
-
-      // Resize chart if switching to chart tab
-      if (btn.dataset.tab === 'chart' && typeof scoreChart !== 'undefined' && scoreChart) {
-        scoreChart.resize();
-      }
-      // Fit tree horizontally when switching to tree tab
-      if (btn.dataset.tab === 'tree') {
-        requestAnimationFrame(() => applyFitHorizontal(document.getElementById('tree-container'), false));
-      }
+      location.hash = btn.dataset.tab;
+      activateTab(btn.dataset.tab);
     });
+  });
+
+  window.addEventListener('hashchange', () => {
+    const tab = location.hash.replace('#', '');
+    if (tab && Array.from(buttons).some((b) => b.dataset.tab === tab)) {
+      activateTab(tab);
+    }
   });
 }
 

@@ -52,7 +52,7 @@ const stageEmojis = {
   root: '🌸',
   improve: '✨',
   fusion: '🧬',
-  debug: '💬',
+  debug: '🐛',
   draft: '🌟',
 };
 
@@ -63,6 +63,22 @@ const improveTierEmojis = {
 };
 
 function getNodeEmoji(node) {
+  // Fix nodes (child of an error node) — check before self-error since
+  // a fix can fail and have null score too.
+  if (node.parent_id && node.stage !== 'root') {
+    const parent = StateLoader.getNodes().find(n => n.id === node.parent_id);
+    if (parent && parent.score === null) {
+      return '🐛';
+    }
+  }
+  // Debug stage nodes are always fix attempts.
+  if (node.stage === 'debug') {
+    return '🐛';
+  }
+  // Error nodes get a bomb emoji.
+  if (node.score === null && node.stage !== 'root') {
+    return '💥';
+  }
   if (node.stage === 'improve') {
     const histEntry = StateLoader.getHistoryEntryForStep(node.step);
     const tier = histEntry?.tier;
@@ -167,20 +183,19 @@ function renderTree() {
     rangeItem.textContent = `score ${Math.min(...allScores).toFixed(3)}–${Math.max(...allScores).toFixed(3)}`;
     legend.appendChild(rangeItem);
   }
-  const stages = [...new Set(nodes.map(n => n.stage))];
-  for (const stage of stages) {
+  const legendEntries = [
+    { emoji: '🌸', label: 'Root' },
+    { emoji: '💫', label: 'Improve T1' },
+    { emoji: '🎀', label: 'Improve T2' },
+    { emoji: '🌈', label: 'Improve T3' },
+    { emoji: '🐛', label: 'Debug / Fix' },
+    { emoji: '🧬', label: 'Fusion' },
+    { emoji: '💥', label: 'Error' },
+  ];
+  for (const { emoji, label } of legendEntries) {
     const item = document.createElement('div');
     item.className = 'legend-item';
-    const dot = document.createElement('span');
-    dot.className = 'legend-dot';
-    dot.style.background = getNodeColor({ stage });
-    item.appendChild(dot);
-    const count = nodes.filter(n => n.stage === stage).length;
-    if (stage === 'improve') {
-      item.appendChild(document.createTextNode(`${improveTierEmojis[1]}T1 ${improveTierEmojis[2]}T2 ${improveTierEmojis[3]}T3 improve (${count})`));
-    } else {
-      item.appendChild(document.createTextNode(`${stageEmojis[stage] || ''} ${stage} (${count})`));
-    }
+    item.textContent = `${emoji} ${label}`;
     legend.appendChild(item);
   }
   container.appendChild(legend);

@@ -987,6 +987,22 @@ section:hover h2 {
   transform: scale(1.2);
 }
 
+.iterations-legend {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.legend-tag {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* ── Node details panels ── */
 
 .detail-row {
