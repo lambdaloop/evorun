@@ -1,5 +1,7 @@
 
-<img src="./logo.png" height="200px">
+<p align="center">
+<img src="./logo.png" height="250px">
+</p>
 
 # treevee 
 
