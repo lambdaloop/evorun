@@ -1,3 +1,8 @@
+
+<p align="center">
+<img src="./logo.png" height="250px">
+</p>
+
 # treevee 
 
 Optimize anything with a scoring function, tree search, and large language models. 
