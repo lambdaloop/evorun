@@ -2956,16 +2956,18 @@ Do not try to improve the score — just fix the errors.
             parts.append("(Context file is available — avoid reading many files; rely on this context)")
             parts.append(self.codebase._context_content)
 
-        # --- What was tried (anti-repetition) ---
-        tried_lines = self._format_previous_attempts()
-        if tried_lines:
-            parts.extend(tried_lines)
 
         # --- History summary ---
         history_lines = self._format_history_summary()
         if history_lines:
             parts.append("### Recent history\n" + "\n".join(history_lines))
 
+
+        # --- What was tried (anti-repetition) ---
+        tried_lines = self._format_previous_attempts()
+        if tried_lines:
+            parts.extend(tried_lines)
+            
         return "\n".join(parts)
 
     # ─── Fusion agent ───────────────────────────────────────────────
@@ -3325,7 +3327,7 @@ a messy combination of several.
         """
         if not self.history:
             return []
-        recent = [e for e in self.history if e.edit_summary]
+        recent = [e for e in self.history[-5:] if e.edit_summary]
         if not recent:
             return []
         lines = ["## Previously tried approaches (do NOT repeat these)"]
@@ -3651,7 +3653,7 @@ a messy combination of several.
 
 # Default values for argparse arguments (used to detect if CLI was explicitly set).
 _ARGPARSE_DEFAULTS: dict[str, Any] = {
-    "max_children": 10,
+    "max_children": 7,
     "optim_mode": "min",
     "max_iters": 50,
     "time_limit": 0,
