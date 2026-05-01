@@ -616,6 +616,7 @@ class TreeSearch:
                     except (OSError, _json.JSONDecodeError):
                         pass
             node.eval_output = eval_output
+            node.fusion_source_ids = nd.get("fusion_source_ids", [])
 
             node.metric = MetricValue(value=nd["score"], maximize=self.maximize)
             node_map[node.id] = node
