@@ -76,10 +76,6 @@ _run_logger = logging.getLogger("treevee")
 MAX_OUTPUT_LINES = 50
 MAX_OUTPUT_LINE_LEN = 200
 
-# Speed warning thresholds (fraction of eval_timeout).
-SPEED_CRITICAL_THRESHOLD = 0.9
-SPEED_WARNING_THRESHOLD = 0.7
-
 # Stagnation / no-change detection.
 MAX_CONSECUTIVE_NO_CHANGES = 3
 
@@ -1478,7 +1474,7 @@ Produce a concise plan following this structure.
         mod_files = self.codebase.get_experiment_files()
         file_list = "\n".join(f"- {f}" for f in mod_files) if mod_files else "- (any files in experiment/)"
         editor_prompt = f"""\
-You are a senior Python developer implementing a code improvement plan.
+You are a senior developer implementing a code improvement plan.
 
 ## Score Context
 {score_summary}
@@ -2383,57 +2379,6 @@ Do not try to improve the score — just fix the errors.
         self.save_state()
         self._iteration += 1
 
-    @staticmethod
-    def _parse_eval_description(description: str) -> list[tuple[str, float]]:
-        """Parse key=value and key: value pairs from an eval description string.
-
-        Args:
-            description: The "description" field from the eval output.
-
-        Returns:
-            List of (name, numeric_value) tuples.
-        """
-        metrics: list[tuple[str, float]] = []
-        parts = description.replace(",", " ").split()
-        for part in parts:
-            for sep in [":", "="]:
-                if sep in part:
-                    name, value = part.split(sep, 1)
-                    try:
-                        metrics.append((name.strip(), float(value)))
-                        break
-                    except ValueError:
-                        continue
-        return metrics
-
-    @staticmethod
-    def _extract_task_hints(task_content: str | None) -> list[str]:
-        """Extract bullet hints from the Hints section of a task file.
-
-        Args:
-            task_content: Contents of TASK.md or None if not found.
-
-        Returns:
-            List of hint strings from the Hints section.
-        """
-        if not task_content:
-            return []
-
-        lines = task_content.splitlines()
-        hints = []
-        in_hints = False
-
-        for line in lines:
-            if re.match(r'^##\s+Hints\b', line):
-                in_hints = True
-                continue
-            if in_hints:
-                if line.strip().startswith("#"):
-                    break
-                if line.strip().startswith("-"):
-                    hints.append(line.strip()[1:].strip())
-
-        return hints
 
     def _generate_fake_score(
         self,
@@ -2981,20 +2926,6 @@ Do not try to improve the score — just fix the errors.
                 parts.extend(directive_lines)
                 parts.append("")
 
-            if result.score is not None and result.description:
-                parsed_metrics = self._parse_eval_description(result.description)
-                if parsed_metrics:
-                    breakdown_lines = self._build_score_breakdown(parsed_metrics)
-                    if breakdown_lines:
-                        parts.append("## Scoring breakdown")
-                        parts.extend(breakdown_lines)
-                        suggestions = self._build_improvement_suggestions(
-                            parsed_metrics, result.description,
-                        )
-                        if suggestions:
-                            parts.append("## Suggested improvements")
-                            parts.extend(suggestions)
-
             if code_review_notes:
                 parts.extend([code_review_notes, ""])
 
@@ -3394,7 +3325,7 @@ a messy combination of several.
         """
         if not self.history:
             return []
-        recent = [e for e in self.history[-5:] if e.edit_summary]
+        recent = [e for e in self.history if e.edit_summary]
         if not recent:
             return []
         lines = ["## Previously tried approaches (do NOT repeat these)"]
@@ -3425,10 +3356,6 @@ a messy combination of several.
             ]
         elif result.output:
             return self._format_eval_failure(result)
-        elif (result.exec_time or 0.0) > self.eval_timeout * SPEED_CRITICAL_THRESHOLD:
-            return self._format_critical_speed_warning(result)
-        elif (result.exec_time or 0.0) > self.eval_timeout * SPEED_WARNING_THRESHOLD:
-            return self._format_speed_warning(result)
         return []
 
     def _format_timeout_info(self, result: EvalResult) -> list[str]:
@@ -3456,62 +3383,6 @@ a messy combination of several.
         else:
             lines.append("None — nothing output before kill.")
 
-        lines.extend([
-            "",
-            "## Why this matters",
-            "A timeout means the eval command was killed by the OS before returning. "
-            "Common causes:",
-            "- **Infinite loop or unbounded recursion**",
-            "- **Blocking I/O** — print(input()), sys.stdin.read()",
-            "- **Expensive computation** — O(n^2) or worse",
-            "- **Network call with no timeout**",
-            "- **Blocking file I/O**",
-            "",
-            "## What to check first",
-            "1. Review all loops (while/for) — do they have proper termination?",
-            "2. Remove blocking I/O (no print(input()), no sys.stdin.read())",
-            "3. Avoid expensive operations on large datasets",
-            "4. Add early exits (break when done)",
-            "5. Check if any data loading could be blocking",
-            "",
-            "## PRIORITY: The eval timed out — this is a hard fail.",
-            "Every iteration that times out wastes time without making progress.",
-            "You MUST make the code run faster. Do not try to improve scores if "
-            "the eval command cannot complete.",
-        ])
-        return lines
-
-    def _format_common_timeout_causes(self, include_output_clue: bool = False) -> list[str]:
-        """Format common timeout causes and troubleshooting checklist.
-
-        Args:
-            include_output_clue: Whether to add the captured-output clue line.
-
-        Returns:
-            List of lines for the common causes section.
-        """
-        lines: list[str] = [
-            "",
-            "## Why this matters",
-            "Common causes:",
-            "- **Infinite loop or unbounded recursion** — check all while/for loops",
-            "- **Blocking I/O** — print(input()), sys.stdin.read() can hang forever",
-            "- **Expensive computation** — O(n^2) or worse on large datasets",
-            "- **Network call with no timeout** — stuck waiting for a response",
-            "",
-            "## What to check",
-            "1. Review all loops for proper termination conditions",
-            "2. Remove any blocking I/O calls (print(input()), sys.stdin.read())",
-            "3. Avoid expensive operations on large datasets",
-            "4. Use bounded/early-exit loops",
-        ]
-        if include_output_clue:
-            lines.append(
-                "5. **The captured output above is what happened before the kill —"
-            )
-            lines.append(
-                "   that is your strongest clue for what went wrong.**",
-            )
         return lines
 
     def _format_score_result(self, result: EvalResult) -> list[str]:
@@ -3550,54 +3421,15 @@ a messy combination of several.
         lines.append("```\n")
         return lines
 
-    def _format_critical_speed_warning(self, result: EvalResult) -> list[str]:
-        """Format critical speed warning (90%+ of timeout).
-
-        Args:
-            result: Eval result approaching timeout.
-
-        Returns:
-            List of lines for critical speed warning.
-        """
-        lines: list[str] = [
-            f"**CRITICAL**: Last run took {result.exec_time:.1f}s "
-            f"(90% of {self.eval_timeout}s timeout)",
-            "Minor regressions will cause timeouts.",
-        ]
-        if result.output:
-            lines.append("```\n")
-            for line in result.output[:MAX_OUTPUT_LINES]:
-                lines.append(str(line)[:MAX_OUTPUT_LINE_LEN])
-            lines.append("\n```")
-        else:
-            lines.append("None — nothing was output before the process was killed.")
-        lines.extend(self._format_common_timeout_causes(include_output_clue=True))
-        return lines
-
-    def _format_speed_warning(self, result: EvalResult) -> list[str]:
-        """Format speed warning (70-90% of timeout).
-
-        Args:
-            result: Eval result approaching timeout.
-
-        Returns:
-            List of lines for speed warning.
-        """
-        return [
-            f"**WARNING**: Last run took {result.exec_time:.0f}s, "
-            f"approaching the timeout of {self.eval_timeout}s.",
-            "If the score isn't strong, try simplifying.",
-        ]
-
     def _format_history_summary(self) -> list[str]:
-        """Format recent history summary (last 5 iterations).
+        """Format full history summary.
 
         Returns:
             List of history summary lines, or empty list if no history.
         """
         if not self.history:
             return []
-        recent = self.history[-5:]
+        recent = self.history
         history_lines: list[str] = []
 
         # Collect scored entries for trend analysis
@@ -3661,75 +3493,6 @@ a messy combination of several.
                 line += f" [{summary}]"
             history_lines.append(line)
         return history_lines
-
-    def _build_score_breakdown(
-        self, scored_parts: list[tuple[str, float]]
-    ) -> list[str]:
-        """Build a human-readable score breakdown from parsed metrics.
-
-        Args:
-            scored_parts: List of (name, value) pairs from eval.description.
-
-        Returns:
-            Lines suitable for markdown formatting.
-        """
-        if not scored_parts:
-            return []
-
-        # Metric bounds with direction: 'high' = higher value is better,
-        # 'low' = lower value is better.
-        bounds_by_name: dict[str, dict[str, Any]] = {
-            "score": {"lower": 0, "upper": 1, "direction": "high"},
-            "accuracy": {"lower": 0, "upper": 1, "direction": "high"},
-            "rmse": {"lower": 0, "upper": float("inf"), "direction": "low"},
-            "mse": {"lower": 0, "upper": float("inf"), "direction": "low"},
-            "mae": {"lower": 0, "upper": float("inf"), "direction": "low"},
-            "loss": {"lower": 0, "upper": float("inf"), "direction": "low"},
-            "precision": {"lower": 0, "upper": 1, "direction": "high"},
-            "recall": {"lower": 0, "upper": 1, "direction": "high"},
-            "f1": {"lower": 0, "upper": 1, "direction": "high"},
-            "r2": {"lower": 0, "upper": 1, "direction": "high"},
-            "log_loss": {"lower": 0, "upper": float("inf"), "direction": "low"},
-            "auc": {"lower": 0, "upper": 1, "direction": "high"},
-        }
-
-        parts: list[str] = []
-        for key, value in scored_parts:
-            name = key.replace("_", " ").capitalize()
-            if key in bounds_by_name:
-                b = bounds_by_name[key]
-                lower = b["lower"]
-                upper = b["upper"]
-                direction = b["direction"]  # 'high' or 'low' in absolute terms
-
-                # Compute normalized score [0, 1] where 1 = best
-                if upper == float("inf"):
-                    # Error metric (RMSE, etc.): use 1/(1+sqrt(v)) so 0→1.0, large→0
-                    norm = 1.0 / (1.0 + (value ** 0.5)) if value > 0 else 1.0
-                else:
-                    norm = max(0.0, min(1.0, (value - lower) / (upper - lower)))
-
-                # If direction is 'low' (lower is better), invert the norm
-                if direction == "low":
-                    norm = 1.0 - norm
-
-                # Invert again if minimization mode and direction is 'high'
-                # (e.g. minimizing score: a high score value is "bad" in minimize mode)
-                if not self.tree.maximize and direction == "high":
-                    norm = 1.0 - norm
-
-                filled = min(10, int(norm * 10))
-                bar = "#" * filled + "." * (10 - filled)
-                if norm >= 0.8:
-                    label = "good"
-                elif norm >= 0.4:
-                    label = "needs work"
-                else:
-                    label = "poor"
-                parts.append(f"- {name}: {value:.4f} [{bar}] ({label})")
-            else:
-                parts.append(f"- {name}: {value:.4f}")
-        return parts
 
     def _build_task_context(self, task_content: str | None) -> list[str]:
         """Build task-specific context from the loaded TASK.md file.
@@ -3859,126 +3622,7 @@ a messy combination of several.
         directive.append("\nYou may NOT modify eval.py, evaluation.py, or external test harnesses.\n")
         directive.append("**Make specific code changes now to improve the score.**")
 
-        # Add performance-based hints
-        if result.description:
-            hint_lines = self._build_metric_hints(result)
-            if hint_lines:
-                directive.append("")
-                directive.append("Performance notes:")
-                directive.extend(hint_lines)
-
-        # Add relevant task hints
-        hints = self._extract_task_hints(self.codebase._task_content)
-        if hints:
-            directive.append("")
-            directive.append("Relevant strategies:")
-            for hint in hints[:3]:
-                directive.append(f"- {hint}")
-
         return directive
-
-    def _build_metric_hints(self, result: EvalResult) -> list[str]:
-        """Generate specific hints based on eval metrics from the description.
-
-        Args:
-            result: Latest evaluation results.
-
-        Returns:
-            List of hint strings.
-        """
-        hints: list[str] = []
-        desc = result.description.lower()
-
-        mse_match = re.search(r'mse[=:\s]+([0-9]+\.?\d*)', desc)
-        if mse_match:
-            mse = float(mse_match.group(1))
-            if self.tree.maximize and mse > 1.0:
-                hints.append(f"- **MSE ({mse:.6f}) is high** — focus on reducing prediction error")
-            elif not self.tree.maximize:
-                hints.append(f"- MSE: {mse:.6f} (your target is the overall score)")
-
-        speed_match = re.search(r'(\d+\.?\d*)\s*(?:ms|milliseconds?)', desc)
-        if speed_match:
-            time_ms = float(speed_match.group(1))
-            if time_ms > 20:
-                hints.append(f"- **Speed ({time_ms:.1f}ms) is slow** - optimize for faster execution")
-            elif time_ms > 10:
-                hints.append("- Speed could be improved (current: {:.1f}ms)".format(time_ms))
-
-        acc_match = re.search(r'acc(?:uracy)?(?:_?factor)?[=:\s]+([0-9]+\.?\d*)', desc)
-        if acc_match:
-            acc = float(acc_match.group(1))
-            if self.tree.maximize:
-                if acc < 0.5:
-                    hints.append(f"- Accuracy factor ({acc:.3f}) is low")
-                elif acc < 0.8:
-                    hints.append(f"- Accuracy factor could improve ({acc:.3f})")
-            else:
-                hints.append(f"- Accuracy factor: {acc:.3f} (your target is the overall score)")
-
-        return hints
-
-    def _build_improvement_suggestions(
-        self,
-        scored_parts: list[tuple[str, float]],
-        desc: str,
-    ) -> list[str]:
-        """Compute improvement suggestions from weak metrics in the scored parts.
-
-        Args:
-            scored_parts: List of (name, value) pairs from eval description.
-            desc: The full description string (for fallback parsing).
-
-        Returns:
-            List of suggestion strings for markdown formatting.
-        """
-        parts: list[str] = []
-
-        # Parse out numeric metrics.
-        metrics: dict[str, float] = {}
-        for key, value in scored_parts:
-            metrics[key] = value
-
-        # Check if any metrics exist.
-        if not metrics:
-            return parts
-
-       # Build suggestions based on metric scores.
-        # In maximization mode, absolute thresholds are appropriate
-        # (low accuracy = bad, high RMSE = bad). In minimization mode,
-        # sub-metrics contribute to the overall score differently,
-        # so we report values without directional advice.
-        if "accuracy" in metrics:
-            acc = metrics["accuracy"]
-            if self.tree.maximize and acc < 0.5:
-                parts.append(
-                    "- Accuracy is low (<0.5). Consider a different model or "
-                    "architecture."
-                )
-            elif self.tree.maximize and acc < 0.8:
-                parts.append(
-                    f"- Accuracy could be improved (current: {acc:.4f}). "
-                    "Try tuning hyperparameters."
-                )
-            elif not self.tree.maximize:
-                parts.append(f"- Accuracy: {acc:.4f} (note: your target is the overall score)")
-
-        if "rmse" in metrics:
-            rmse = metrics["rmse"]
-            if self.tree.maximize and rmse > 1.0:
-                parts.append(
-                    f"- High RMSE ({rmse:.4f}). Review model performance."
-                )
-            elif not self.tree.maximize:
-                parts.append(f"- RMSE: {rmse:.4f} (note: your target is the overall score)")
-
-        if "fit_time_ms" in metrics:
-            fit_time = metrics["fit_time_ms"]
-            if fit_time > 5000:
-                parts.append(f"- Execution time ({fit_time:.2f}ms) could be "
-                                "improved.")
-
-        return parts
 
     def _compute_file_hashes(self, files: list[str]) -> dict[str, str]: 
         """Compute SHA-256 hashes of Python files in the codebase.
