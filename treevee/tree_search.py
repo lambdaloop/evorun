@@ -46,24 +46,6 @@ _DEFAULT_EXPLORE_C = 1.0
 # collapsing onto 1-2 dominant branches.
 _SPARSITY_BONUS = 0.2
 
-# Widening pressure -- encourages nodes with many subtree visits but few
-# direct children to spawn additional siblings instead of letting the
-# search drill deeper.  Target children = sqrt(visits); pressure decays
-# as num_children approaches that target.  Visits-driven (not Q-driven):
-# upstream nodes naturally accumulate visits and so naturally need more
-# breadth, even when their mean_reward is moderate compared to a fresh
-# great descendant.
-_WIDENING_C = 0.3
-
-# Depth penalty -- subtracted from UCT for each level below the root.
-# Without this, a fresh deep-leaf great node (Q=1.0 percentile rank) and
-# a good upstream node both compete on Q, but the deep leaf usually
-# wins by a hair, and the search keeps drilling.  A small per-level
-# penalty tilts selection back toward shallower nodes so the great
-# upstream node gets revisited and spawns more siblings before the
-# search commits deeper.
-_DEPTH_PENALTY = 0.05
-
 # Own-score bonus -- small additive term proportional to the node's OWN
 # normalized score (not its subtree max).  With max-backpropagation a
 # parent and its best child share the same Q, so without this term
@@ -104,8 +86,6 @@ class TreeSearch:
         self.max_children = max_children
         self.explore_c = explore_c if explore_c is not None else _DEFAULT_EXPLORE_C
         self.sparsity_bonus = _SPARSITY_BONUS
-        self.widening_c = _WIDENING_C
-        self.depth_penalty = _DEPTH_PENALTY
 
         # Core search structures (reused from MLEvolve)
         self.journal = Journal()
@@ -254,26 +234,13 @@ class TreeSearch:
         if node is not self.root and (not node.metric or node.metric.value is None):
             exploration += self.explore_c * 2.0 / max(node.visits, 1)
 
-        # Widening pressure: target sqrt(visits) direct children, minus 1
-        # so a fresh leaf (visits=1, num_children=0) gets ZERO widening
-        # boost — otherwise we'd reward exactly the deep-leaf nodes we're
-        # trying to deprioritize.  Upstream nodes with visits >> 1 still
-        # accumulate strong widening pressure when they're under-widened.
-        widening_target: float = math.sqrt(max(node.visits, 1))
-        deficit: float = max(0.0, widening_target - node.num_children - 1)
-        widening: float = self.widening_c * deficit / (node.num_children + 1)
-
-        # Depth penalty: discourage drilling far below the root when
-        # equivalent-Q candidates exist higher up.
-        depth_pen: float = self.depth_penalty * self._node_depth(node)
-
         # Own-score bonus: breaks ties between a parent and its best child
         # (both share the same subtree-max Q) in favour of the actual
         # best-scoring leaf.
         own_reward: float = self._reward_from_score(
             node.metric.value if node.metric else None
         )
-        uct: float = q + exploration + widening - depth_pen + _OWN_SCORE_BONUS * own_reward
+        uct: float = q + exploration + _OWN_SCORE_BONUS * own_reward
 
         # Sparsity bonus for under-explored branches (root children only).
         # Log-scaled so a large imbalance doesn't overwhelm the UCT signal.
