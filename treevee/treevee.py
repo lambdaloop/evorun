@@ -3114,20 +3114,37 @@ Do not try to improve the score — just fix the errors.
         # Load code from snapshots (node.code is "" for nodes created before this fix).
         target_code = target_node.code or self._read_snapshot_code(target_node)
 
-        # Build reference trajectories (as diffs vs target)
+        # Build reference trajectories (as diffs vs target), skipping candidates
+        # whose code is identical to the target (empty diff = no useful signal).
         reference_sections = []
-        for i, ref_node in enumerate(candidates):
+        ref_idx = 0
+        for ref_node in candidates:
             ref_score = ref_node.metric.value if ref_node.metric else "N/A"
             ref_q = ref_node.total_reward / max(ref_node.visits, 1)
             ref_code = ref_node.code or self._read_snapshot_code(ref_node)
             diff_str = self._compute_code_diff(
                 target_code, ref_code,
-                fromfile="target", tofile=f"ref_{i + 1}",
+                fromfile="target", tofile=f"ref_{ref_idx + 1}",
             )
+            if not diff_str.strip():
+                _run_logger.info(
+                    f"[Fusion] Skipping candidate {ref_node.id[:8]} — "
+                    f"code identical to target"
+                )
+                continue
+            ref_idx += 1
             reference_sections.append(
-                f"## Reference Solution {i + 1} (Score: {ref_score}, Q: {ref_q:.4f})\n"
+                f"## Reference Solution {ref_idx} (Score: {ref_score}, Q: {ref_q:.4f})\n"
                 f"Diff vs target:\n```\n{diff_str}\n```\n"
             )
+
+        # All candidates were identical — nothing to fuse.
+        if not reference_sections:
+            _run_logger.info(
+                f"[Fusion] All candidates identical to target "
+                f"for node {target_node.id[:8]} — skipping"
+            )
+            return None, "", [], [], [], False, "", ""
 
         # Build target node context (score + eval output)
         target_score = target_node.metric.value if target_node.metric else None
@@ -3135,7 +3152,7 @@ Do not try to improve the score — just fix the errors.
         target_stage = target_node.stage or "unknown"
 
         _run_logger.info(f"[Fusion] Running fusion for node {target_node.id[:8]} "
-                        f"with {len(candidates)} reference(s)")
+                        f"with {len(reference_sections)} reference(s)")
 
         # Two-stage fusion: planner → editor
         modified_files: list[str] = []
