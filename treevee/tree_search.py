@@ -64,6 +64,13 @@ _WIDENING_C = 0.3
 # search commits deeper.
 _DEPTH_PENALTY = 0.05
 
+# Own-score bonus -- small additive term proportional to the node's OWN
+# normalized score (not its subtree max).  With max-backpropagation a
+# parent and its best child share the same Q, so without this term
+# the parent can beat the child due to widening pressure or sparsity
+# bonuses.  This nudges selection toward the actual best-scoring leaf.
+_OWN_SCORE_BONUS = 0.1
+
 
 class TreeSearch:
     """Lightweight MCTS for iterative LLM-driven optimization.
@@ -212,7 +219,7 @@ class TreeSearch:
         logger.info(
             f"[Tree] Selected node {best_node.id[:8]} ({node_label}, "
             f"UCT={_best_score:.4f}, raw={raw}, "
-            f"Q={best_node.total_reward / max(best_node.visits, 1):.4f}, "
+            f"Q={best_node.total_reward:.4f}, "
             f"children={best_node.num_children}, depth={self._node_depth(best_node)})"
         )
 
@@ -231,22 +238,20 @@ class TreeSearch:
         exploration bonus, with sparsity bonus for under-explored branches.
         """
         # With max-backprop, total_reward IS the best reward in the subtree.
-        mean_reward: float = node.total_reward
+        q: float = node.total_reward
 
         parent_visits: int = node.parent.visits if node.parent else 1
-        # Q-weighted exploration (PUCT-style): a fresh node with num_children=0
-        # would otherwise dominate selection regardless of its score, since
-        # exploration ≈ √ln(parent_visits) ≫ Q's [0,1] range.  Scaling by
-        # mean_reward keeps high-Q nodes attractive for widening while
-        # preventing low-scoring fresh children from being preferred over
-        # their better-performing parent or siblings.
-        exploration: float = self.explore_c * mean_reward * math.sqrt(
+        # Standard UCT exploration — not Q-scaled.  With max-backpropagation,
+        # scaling by Q would give a compounding advantage to nodes that
+        # inherited a high subtree max, causing them to be expanded to death.
+        exploration: float = self.explore_c * math.sqrt(
             math.log(max(parent_visits, 1) + 1) / (node.num_children + 1)
         )
 
         # Broken node bonus — decays with visits so the node gets tried
-        # early but doesn't dominate long-term selection.
-        if not node.metric or node.metric.value is None:
+        # early but doesn't dominate long-term selection.  Exclude root: its
+        # metric is always None by design, not because evaluation failed.
+        if node is not self.root and (not node.metric or node.metric.value is None):
             exploration += self.explore_c * 2.0 / max(node.visits, 1)
 
         # Widening pressure: target sqrt(visits) direct children, minus 1
@@ -262,7 +267,13 @@ class TreeSearch:
         # equivalent-Q candidates exist higher up.
         depth_pen: float = self.depth_penalty * self._node_depth(node)
 
-        uct: float = mean_reward + exploration + widening - depth_pen
+        # Own-score bonus: breaks ties between a parent and its best child
+        # (both share the same subtree-max Q) in favour of the actual
+        # best-scoring leaf.
+        own_reward: float = self._reward_from_score(
+            node.metric.value if node.metric else None
+        )
+        uct: float = q + exploration + widening - depth_pen + _OWN_SCORE_BONUS * own_reward
 
         # Sparsity bonus for under-explored branches (root children only).
         # Log-scaled so a large imbalance doesn't overwhelm the UCT signal.
