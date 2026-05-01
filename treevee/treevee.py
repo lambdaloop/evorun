@@ -4,10 +4,6 @@ A standalone Monte Carlo Tree Search (MCTS) optimizer that iteratively
 improves code using LLM feedback. Designed as a lightweight alternative
 to the full MLEvolve system, with a single-process execution model.
 
-See EVORUN_DEVELOPER.md for internal architecture, data flow,
-state file format, extensibility guide, and planned MLEvolve features.
-See EVORUN_GUIDE.md for usage, examples, and troubleshooting.
-
 Features:
     - Evaluates current codebase, queries LLM for improvements, applies changes
     - Evaluates resulting code, measures improvement, repeats
