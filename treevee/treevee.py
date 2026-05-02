@@ -1281,7 +1281,7 @@ class EvoRunAgent:
         if stagnation >= STAGNATION_TIER_ESCALATE:
             tier = random.choice([2, 3])
             _run_logger.info(
-                f"[Iter {self._iteration}] Stagnation={stagnation} >= "
+                f"[Iter {self._iteration + 1}] Stagnation={stagnation} >= "
                 f"{STAGNATION_TIER_ESCALATE} — forced Tier {tier}"
             )
             return tier
@@ -1299,7 +1299,7 @@ class EvoRunAgent:
         else:
             tier = 3
         _run_logger.info(
-            f"[Iter {self._iteration}] Stagnation={stagnation}, depth={depth} "
+            f"[Iter {self._iteration + 1}] Stagnation={stagnation}, depth={depth} "
             f"(p1={p1:.2f}, p2={p2:.2f}) — sampled Tier {tier}"
         )
         return tier
@@ -1359,7 +1359,7 @@ class EvoRunAgent:
         if substantive_files:
             chosen_file = random.choice(substantive_files)
             _run_logger.info(
-                f"[Iter {self._iteration}] Random nudge: focusing planner on "
+                f"[Iter {self._iteration + 1}] Random nudge: focusing planner on "
                 f"experiment/{chosen_file}"
             )
             file_nudge_section = (
@@ -1453,7 +1453,7 @@ Produce a concise plan following this structure.
             )
             return (planner_prompt, result.strip())
         except Exception as e:
-            _run_logger.warning(f"Planner failed (iter {self._iteration}): {e}")
+            _run_logger.warning(f"Planner failed (iter {self._iteration + 1}): {e}")
             return (planner_prompt, "")
 
     def _run_editor(self, plan: str, feedback: str) -> tuple[str, str]:
@@ -1525,7 +1525,7 @@ Do NOT modify eval.py, evaluation.py, or external test harnesses.
             )
             return (editor_prompt, result)
         except Exception as e:
-            _run_logger.warning(f"Editor failed (iter {self._iteration}): {e}")
+            _run_logger.warning(f"Editor failed (iter {self._iteration + 1}): {e}")
             return (editor_prompt, "")
 
     def _format_error_context(self, result: EvalResult, stored_output: str = "") -> str:
@@ -1645,7 +1645,7 @@ alternatives or discuss trade-offs. Pick the single best fix and commit.
             )
             return (planner_prompt, result.strip())
         except Exception as e:
-            _run_logger.warning(f"Error planner failed (iter {self._iteration}): {e}")
+            _run_logger.warning(f"Error planner failed (iter {self._iteration + 1}): {e}")
             return (planner_prompt, "")
 
     def _run_error_editor(self, fix_plan: str, result: EvalResult, stored_output: str = "") -> tuple[str, str]:
@@ -1701,7 +1701,7 @@ Do not try to improve the score — just fix the errors.
             )
             return (editor_prompt, result)
         except Exception as e:
-            _run_logger.warning(f"Error editor failed (iter {self._iteration}): {e}")
+            _run_logger.warning(f"Error editor failed (iter {self._iteration + 1}): {e}")
             return (editor_prompt, "")
 
     # ─── Main entry point ────────────────────────────────────────
@@ -1748,14 +1748,14 @@ Do not try to improve the score — just fix the errors.
                 break
 
             if self._iteration > 0:
-                _run_logger.info(f"[Iter {self._iteration}] "
+                _run_logger.info(f"[Iter {self._iteration + 1}] "
                             f"--- Next iteration ---")
 
             try:
                 self._run_iteration()
             except Exception as e:
                 _run_logger.error(
-                    f"[Iter {self._iteration}] Unexpected error: {e}",
+                    f"[Iter {self._iteration + 1}] Unexpected error: {e}",
                     exc_info=True,
                 )
                 self.history.append(HistoryEntry(
@@ -1836,7 +1836,7 @@ Do not try to improve the score — just fix the errors.
             _best = self.best_score if self.best_score is not None else "N/A"
             _run_logger.info(f"[reuse] node={target_node.id[:8]} score={_score} best={_best}")
             _run_logger.info(
-                f"[Iter {self._iteration}] Reusing existing eval score "
+                f"[Iter {self._iteration + 1}] Reusing existing eval score "
                 f"for node {target_node.id[:8]} (skip baseline)"
             )
         target_node_dir: str | None = None
@@ -1865,16 +1865,16 @@ Do not try to improve the score — just fix the errors.
             if self.fake_run:
                 fake_score = self._generate_fake_score(parent_score=None, parent_node=None)
                 result = EvalResult(
-                    score=fake_score, description=f"Fake score (iteration {self._iteration})",
+                    score=fake_score, description=f"Fake score (iteration {self._iteration + 1})",
                     timed_out=False, exec_time=0.05, output=[],
                 )
-                _run_logger.info(f"[Iter {self._iteration}/{self.max_iters}] Fake eval: "
+                _run_logger.info(f"[Iter {self._iteration + 1}/{self.max_iters}] Fake eval: "
                             f"score={result.score:.4f}")
                 self.consecutive_timeouts = 0
             else:
-                _run_logger.info(f"[Iter {self._iteration}/{self.max_iters}] Starting baseline eval...")
+                _run_logger.info(f"[Iter {self._iteration + 1}/{self.max_iters}] Starting baseline eval...")
                 result = self.evaluator.run()
-                _run_logger.info(f"[Iter {self._iteration}/{self.max_iters}] Baseline eval: "
+                _run_logger.info(f"[Iter {self._iteration + 1}/{self.max_iters}] Baseline eval: "
                             f"score={result.score} (timed_out={result.timed_out}, "
                             f"{result.exec_time:.1f}s)")
 
@@ -1905,7 +1905,7 @@ Do not try to improve the score — just fix the errors.
                 if improved:
                     self.best_score = result.score
                     self._best_snapshot_dir = self._save_node_snapshot(target_node, self._iteration)
-                    _run_logger.info(f"[Iter {self._iteration}] New best score: {result.score}")
+                    _run_logger.info(f"[Iter {self._iteration + 1}] New best score: {result.score}")
 
             # Always record the metric so the node is never re-evaluated.
             # A metric with value=None means the eval ran but produced no score.
@@ -1996,7 +1996,7 @@ Do not try to improve the score — just fix the errors.
                 do_fusion = False
             if do_fusion:
                 # Try cross-branch fusion first
-                _run_logger.info(f"[Iter {self._iteration}] Trying cross-branch fusion...")
+                _run_logger.info(f"[Iter {self._iteration + 1}] Trying cross-branch fusion...")
                 fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input, fusion_source_ids = \
                     self._run_fusion(target_node)
                 planner_output = fusion_plan
@@ -2005,7 +2005,7 @@ Do not try to improve the score — just fix the errors.
 
         # Fix error path for broken nodes — two-stage: error planner → error editor
         if not self.fake_run and is_broken and not used_fusion:
-            _run_logger.info(f"[Iter {self._iteration}] Sending error to error planner...")
+            _run_logger.info(f"[Iter {self._iteration + 1}] Sending error to error planner...")
             prev_hashes = self._compute_file_hashes(
                 self.codebase.get_experiment_files(),
             )
@@ -2015,7 +2015,7 @@ Do not try to improve the score — just fix the errors.
             planner_output = plan
             editor_input = ""
             if plan and plan.strip():
-                _run_logger.info(f"[Iter {self._iteration}] Running error editor with fix plan...")
+                _run_logger.info(f"[Iter {self._iteration + 1}] Running error editor with fix plan...")
                 error_editor_input, log_content = self._run_error_editor(plan, result, stored_output)
                 editor_input = error_editor_input
                 if log_content:
@@ -2024,7 +2024,7 @@ Do not try to improve the score — just fix the errors.
                     )
             else:
                 _run_logger.warning(
-                    f"[Iter {self._iteration}] Error planner produced empty plan — skipping error fix"
+                    f"[Iter {self._iteration + 1}] Error planner produced empty plan — skipping error fix"
                 )
                 log_content = ""
 
@@ -2032,12 +2032,12 @@ Do not try to improve the score — just fix the errors.
 
         # Build feedback (always, for logging and next iteration)
         parent_score = target_node.parent.metric.value if target_node.parent and target_node.parent.metric else None
-        feedback = self._format_feedback(result, self._iteration, tree_info, prev_eval, code_review_notes, debug_instructions, parent_score)
+        feedback = self._format_feedback(result, self._iteration + 1, tree_info, prev_eval, code_review_notes, debug_instructions, parent_score)
 
         if not (used_fusion and log_content) and not self.fake_run and not is_broken:
             # Two-stage: planner → editor
             if feedback:
-                _run_logger.info(f"[Iter {self._iteration}] Sending feedback to planner...")
+                _run_logger.info(f"[Iter {self._iteration + 1}] Sending feedback to planner...")
                 prev_hashes = self._compute_file_hashes(
                     self.codebase.get_experiment_files(),
                 )
@@ -2045,12 +2045,12 @@ Do not try to improve the score — just fix the errors.
                 tier = self._select_planner_tier(
                     target_node.id, depth=self.tree._node_depth(target_node)
                 )
-                _run_logger.info(f"[Iter {self._iteration}] Planner tier: {tier}")
+                _run_logger.info(f"[Iter {self._iteration + 1}] Planner tier: {tier}")
                 planner_input, plan = self._run_planner(feedback, tier=tier)
                 planner_output = plan
                 editor_input = ""
                 if plan and plan.strip():
-                    _run_logger.info(f"[Iter {self._iteration}] Running editor with plan...")
+                    _run_logger.info(f"[Iter {self._iteration + 1}] Running editor with plan...")
                     editor_input, log_content = self._run_editor(plan, feedback)
                     if log_content:
                         _run_logger.info(
@@ -2058,7 +2058,7 @@ Do not try to improve the score — just fix the errors.
                         )
                 else:
                     _run_logger.warning(
-                        f"[Iter {self._iteration}] Planner produced empty plan — skipping code gen"
+                        f"[Iter {self._iteration + 1}] Planner produced empty plan — skipping code gen"
                     )
                     log_content = ""
             # If feedback is empty, log_content stays empty (no LLM call)
@@ -2146,7 +2146,7 @@ Do not try to improve the score — just fix the errors.
             parent_snap = self._find_node_snapshot(target_node)
             if not parent_snap:
                 _run_logger.warning(
-                    f"[Iter {self._iteration}] Cannot compute diff: "
+                    f"[Iter {self._iteration + 1}] Cannot compute diff: "
                     f"snapshot not found for node {target_node.id[:8]}. "
                     f"This should not happen - please report this."
                 )
@@ -2157,7 +2157,7 @@ Do not try to improve the score — just fix the errors.
 
         # Print diff when debugging is enabled.
         if diff_text and self.verbose:
-            print(f"[Iter {self._iteration}] Diff:\n{diff_text}", flush=True)
+            print(f"[Iter {self._iteration + 1}] Diff:\n{diff_text}", flush=True)
 
         # Submit edit summary to background thread — runs in parallel
         # with the child eval below.
@@ -2206,25 +2206,25 @@ Do not try to improve the score — just fix the errors.
             # Duplicate code — reuse parent's score, skip running expensive eval.
             child_score = parent_score
             _run_logger.info(
-                f"[Iter {self._iteration}] Duplicate code detected — "
+                f"[Iter {self._iteration + 1}] Duplicate code detected — "
                 f"reusing parent score: {parent_score}"
             )
         elif self.fake_run:
             child_score = self._generate_fake_score(parent_score=parent_score, parent_node=target_node)
             score_str = f"{child_score:.4f}" if child_score is not None else "None"
-            _run_logger.info(f"[Iter {self._iteration}] Fake child score: {score_str}")
+            _run_logger.info(f"[Iter {self._iteration + 1}] Fake child score: {score_str}")
         elif no_changes:
-            _run_logger.info(f"[Iter {self._iteration}] No code changes — "
+            _run_logger.info(f"[Iter {self._iteration + 1}] No code changes — "
                          f"reusing parent score {parent_score}")
             child_score = parent_score
         else:
-            _run_logger.info(f"[Iter {self._iteration}] Evaluating "
+            _run_logger.info(f"[Iter {self._iteration + 1}] Evaluating "
                          f"child (~{len(modified_files)} modified, "
                          f"+{len(added_files)} added, "
                          f"-{len(deleted_files)} deleted)...")
             child_result = self.evaluator.run()
             child_score = child_result.score
-            _run_logger.info(f"[Iter {self._iteration}] Child eval: "
+            _run_logger.info(f"[Iter {self._iteration + 1}] Child eval: "
                         f"score={child_score} ({child_result.exec_time:.1f}s)")
             # Try to get edit summary without blocking (runs in background).
             edit_summary = ""
@@ -2259,13 +2259,13 @@ Do not try to improve the score — just fix the errors.
             child_node.stage = "fusion"
             child_node.fusion_source_ids = fusion_source_ids
 
-        _run_logger.info(f"[Iter {self._iteration}] Child created: "
+        _run_logger.info(f"[Iter {self._iteration + 1}] Child created: "
                     f"node {child_node.id[:8]} with score={child_score}"
                     f"{' (duplicate)' if is_dup else ''}")
 
         # Log summary line
         if log_content:
-            _run_logger.info(f"[Iter {self._iteration}] Summary: {edit_summary}")
+            _run_logger.info(f"[Iter {self._iteration + 1}] Summary: {edit_summary}")
 
         # Rename pre-snapshot to child's actual snapshot name.
         if pre_snap_dir:
@@ -2324,7 +2324,7 @@ Do not try to improve the score — just fix the errors.
             if improved:
                 self.best_score = child_score
                 self._best_snapshot_dir = f"iter_snapshot_{child_node.id[:8]}"
-                _run_logger.info(f"[Iter {self._iteration}] New global best: "
+                _run_logger.info(f"[Iter {self._iteration + 1}] New global best: "
                                  f"{child_score:.6f}")
 
         # Update per-parent stagnation for child score.
