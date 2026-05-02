@@ -53,6 +53,11 @@ _SPARSITY_BONUS = 0.2
 # bonuses.  This nudges selection toward the actual best-scoring leaf.
 _OWN_SCORE_BONUS = 0.1
 
+# Root expansion bonus -- extra UCT boost for the root proportional to
+# how many child slots remain.  Encourages the root to spawn more top-level
+# branches early, then tapers off as it fills up.
+_ROOT_EXPANSION_BONUS = 0.3
+
 
 class TreeSearch:
     """Lightweight MCTS for iterative LLM-driven optimization.
@@ -253,6 +258,12 @@ class TreeSearch:
                 diff: float = avg_per_branch - branch_expansions
                 if diff > 0:
                     uct += self.sparsity_bonus * math.log1p(diff)
+
+        # Root expansion bonus: encourages spawning more top-level branches.
+        # Proportional to remaining child capacity so it tapers off as root fills.
+        if node is self.root:
+            remaining = self.max_children - node.num_children
+            uct += _ROOT_EXPANSION_BONUS * (remaining / self.max_children)
 
         return uct
 

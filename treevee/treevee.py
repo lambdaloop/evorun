@@ -86,7 +86,7 @@ MAX_CONSECUTIVE_NO_CHANGES = 3
 # are linearly interpolated between the root and deep endpoints; depth >=
 # TIER_DEPTH_THRESHOLD uses the deep endpoint.  Each triple is (T1, T2, T3)
 # and must sum to 1.0.
-TIER_PROBS_AT_ROOT: tuple[float, float, float] = (0.20, 0.40, 0.40)
+TIER_PROBS_AT_ROOT: tuple[float, float, float] = (0.50, 0.30, 0.20)
 TIER_PROBS_AT_DEEP: tuple[float, float, float] = (0.80, 0.15, 0.05)
 TIER_DEPTH_THRESHOLD = 5
 
@@ -1264,7 +1264,7 @@ class EvoRunAgent:
         return needs_fix, "\n".join(review_notes)
 
     def _select_planner_tier(self, target_node_id: str, depth: int = 0) -> int:
-        """Select planner tier based on stagnation, depth, and probabilities.
+        """Select planner tier based on stagnation and depth.
 
         Probabilities depend on node depth: shallow nodes favor Tier 2/3
         (exploring distinct approaches), deep nodes favor Tier 1 (refining
