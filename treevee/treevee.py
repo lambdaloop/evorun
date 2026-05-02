@@ -1352,6 +1352,22 @@ class EvoRunAgent:
             "Do not bundle related tweaks; do not propose 'and also'.  One change.\n"
         )
 
+        # ── Random file nudge for diversity ──
+        experiment_files = self.codebase.get_experiment_files()
+        substantive_files = [f for f in experiment_files if Path(f).name != "__init__.py"]
+        file_nudge_section = ""
+        if substantive_files:
+            chosen_file = random.choice(substantive_files)
+            _run_logger.info(
+                f"[Iter {self._iteration}] Random nudge: focusing planner on "
+                f"experiment/{chosen_file}"
+            )
+            file_nudge_section = (
+                "\n## Suggested Focus File\n"
+                f"Consider looking at `experiment/{chosen_file}` as a candidate for changes.\n"
+                "This is a suggestion — if a different file is clearly a better target, go with that.\n"
+            )
+
         if tier == 1:
             tier_header = (
                 "**Tier 1: Optimization** — keep the current architecture and data flow fixed.\n"
@@ -1411,6 +1427,7 @@ You are a code planning architect. Your job is to analyze evaluation results
 and produce a focused plan for what changes to make.
 
 {common_rules}
+{file_nudge_section}
 {tier_header}
 {plan_structure}
 
