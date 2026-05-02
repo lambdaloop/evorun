@@ -1336,7 +1336,9 @@ class EvoRunAgent:
             "**Diagnosis**: What is limiting performance and why?\n"
             "\n"
             "**Proposed Hypothesis** (exactly 1): the single idea you are testing.\n"
-            "Describe what to change and why.\n"
+            "\n"
+            "**Implementation**: Which specific file(s) to modify and what change(s) to make.\n"
+            "Describe the edit concretely so the editor can execute it directly.\n"
         )
 
         planner_prompt = f"""\
@@ -1344,9 +1346,9 @@ You are a code planning architect. Your job is to analyze evaluation results
 and produce a focused plan for what changes to make.
 
 {common_rules}
-{file_nudge_section}
 {scope_guide}
 {plan_structure}
+{file_nudge_section}
 
 Here is the feedback to analyze:
 {feedback}
@@ -1406,16 +1408,6 @@ Produce a concise plan following this structure.
         editor_prompt = f"""\
 You are a senior developer implementing a code improvement plan.
 
-## Score Context
-{score_summary}
-
-## Your Plan
-{plan}
-
-## Modifiable Files
-{file_list}
-Do NOT modify eval.py, evaluation.py, or external test harnesses.
-
 ## Instructions
 1. Read the files mentioned in the plan to understand the current code.
 2. Implement each change described in the plan faithfully.
@@ -1424,6 +1416,16 @@ Do NOT modify eval.py, evaluation.py, or external test harnesses.
 5. Use Edit tool for targeted changes where possible.
 6. Do NOT make changes beyond what the plan specifies.
 7. After editing, re-read each modified file to verify syntax and imports are correct.
+Do NOT modify eval.py, evaluation.py, or external test harnesses.
+
+## Score Context
+{score_summary}
+
+## Your Plan
+{plan}
+
+## Modifiable Files
+{file_list}
 """
 
         try:
@@ -2854,24 +2856,9 @@ Do not try to improve the score — just fix the errors.
                 parts.append("## From TASK.md")
                 parts.extend(task_tips)
 
-            tree_lines = self._format_tree_context(tree_info)
-            if tree_lines:
-                parts.extend(tree_lines)
-
-            prev_eval_lines = self._format_prev_eval(prev_eval)
-            if prev_eval_lines:
-                parts.extend(prev_eval_lines)
-
             result_lines = self._format_result_info(result)
             if result_lines:
                 parts.extend(result_lines)
-
-        # --- Context from CONTEXT.md ---
-        if self.codebase._context_content:
-            parts.append("## From CONTEXT.md")
-            parts.append("(Context file is available — avoid reading many files; rely on this context)")
-            parts.append(self.codebase._context_content)
-
 
         # --- History summary ---
         history_lines = self._format_history_summary()
@@ -2883,6 +2870,21 @@ Do not try to improve the score — just fix the errors.
             lineage_lines = self._format_lineage(target_node)
             if lineage_lines:
                 parts.extend(lineage_lines)
+
+        # --- Secondary context ---
+        tree_lines = self._format_tree_context(tree_info)
+        if tree_lines:
+            parts.extend(tree_lines)
+
+        prev_eval_lines = self._format_prev_eval(prev_eval)
+        if prev_eval_lines:
+            parts.extend(prev_eval_lines)
+
+        # --- Context from CONTEXT.md ---
+        if self.codebase._context_content:
+            parts.append("## From CONTEXT.md")
+            parts.append("(Context file is available — avoid reading many files; rely on this context)")
+            parts.append(self.codebase._context_content)
 
 
         return "\n".join(parts)
@@ -3539,11 +3541,9 @@ a messy combination of several.
 
         if parent_score is not None:
             delta = result.score - parent_score
-            improved = (delta > 0) if self.tree.maximize else (delta < 0)
-            direction = "improved" if improved else "regressed"
             directive.append(
                 f"Previous score: {parent_score:.4f} → Current: {result.score:.4f} "
-                f"({delta:+.4f}, {direction})"
+                f"({delta:+.4f})"
             )
 
         directive.append("")
