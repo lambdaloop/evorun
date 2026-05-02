@@ -86,9 +86,9 @@ MAX_CONSECUTIVE_NO_CHANGES = 3
 # are linearly interpolated between the root and deep endpoints; depth >=
 # TIER_DEPTH_THRESHOLD uses the deep endpoint.  Each triple is (T1, T2, T3)
 # and must sum to 1.0.
-TIER_PROBS_AT_ROOT: tuple[float, float, float] = (0.50, 0.30, 0.20)
-TIER_PROBS_AT_DEEP: tuple[float, float, float] = (0.80, 0.15, 0.05)
-TIER_DEPTH_THRESHOLD = 5
+TIER_PROBS_AT_ROOT: tuple[float, float, float] = (0.45, 0.30, 0.25)
+TIER_PROBS_AT_DEEP: tuple[float, float, float] = (0.70, 0.18, 0.12)
+TIER_DEPTH_THRESHOLD = 4
 
 # Stagnation threshold: after N consecutive non-improvements on a branch,
 # force Tier 2 or 3 (skip Tier 1).
