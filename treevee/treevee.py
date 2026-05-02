@@ -3036,7 +3036,7 @@ Do not try to improve the score — just fix the errors.
             score_key = lambda n: -n.metric.value  # noqa: E731
         return sorted(eligible, key=score_key, reverse=True)[:max_candidates]
 
-    def _run_fusion(self, target_node) -> tuple[str, str, list[str], list[str], list[str], bool]:
+    def _run_fusion(self, target_node) -> tuple[str, str, list[str], list[str], list[str], bool, str, str, list[str]]:
         """Run cross-branch fusion: merge techniques from other branches into the current node.
 
         Finds fusion candidates from other branches, builds a prompt that asks
@@ -3046,14 +3046,16 @@ Do not try to improve the score — just fix the errors.
             target_node: The SearchNode being expanded.
 
         Returns:
-            Tuple of (fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion, fusion_planner_input, fusion_editor_input).
+            Tuple of (fusion_plan, log_content, modified_files, added_files,
+            deleted_files, used_fusion, fusion_planner_input, fusion_editor_input,
+            source_ids).
         """
         candidates = self._find_fusion_candidates(target_node, max_candidates=2)
 
         # No candidates at all — can't do fusion or fallback
         if not candidates:
             _run_logger.info(f"[Fusion] No candidates found for node {target_node.id[:8]}")
-            return None, "", [], [], [], False, "", ""
+            return None, "", [], [], [], False, "", "", []
 
         # Load code from snapshots (node.code is "" for nodes created before this fix).
         target_code = target_node.code or self._read_snapshot_code(target_node)
@@ -3088,7 +3090,7 @@ Do not try to improve the score — just fix the errors.
                 f"[Fusion] All candidates identical to target "
                 f"for node {target_node.id[:8]} — skipping"
             )
-            return None, "", [], [], [], False, "", ""
+            return None, "", [], [], [], False, "", "", []
 
         # Build target node context (score + eval output)
         target_score = target_node.metric.value if target_node.metric else None
