@@ -80,20 +80,6 @@ MAX_CONSECUTIVE_NO_CHANGES = 3
 # Tier 2: component changes (swap loss/backbone, add regularization, feature engineering)
 # Tier 3: paradigm shift (new algorithm, architectural rewrite, ensemble, GBDT<->NN)
 #
-# Shallow nodes (near the root) favor Tier 2/3 — they're exploring distinct
-# top-level approaches.  Deep nodes favor Tier 1 — they've found a working
-# approach upstream and should refine it rather than abandon it.  Probabilities
-# are linearly interpolated between the root and deep endpoints; depth >=
-# TIER_DEPTH_THRESHOLD uses the deep endpoint.  Each triple is (T1, T2, T3)
-# and must sum to 1.0.
-TIER_PROBS_AT_ROOT: tuple[float, float, float] = (0.45, 0.30, 0.25)
-TIER_PROBS_AT_DEEP: tuple[float, float, float] = (0.70, 0.18, 0.12)
-TIER_DEPTH_THRESHOLD = 4
-
-# Stagnation threshold: after N consecutive non-improvements on a branch,
-# force Tier 2 or 3 (skip Tier 1).
-STAGNATION_TIER_ESCALATE = 3
-
 # Response truncation limits.
 MAX_LLM_RESPONSE_SUMMARY = 300
 MAX_EDIT_SUMMARY_CHARS = 100
@@ -1263,48 +1249,7 @@ class EvoRunAgent:
         needs_fix = len(review_notes) > 0
         return needs_fix, "\n".join(review_notes)
 
-    def _select_planner_tier(self, target_node_id: str, depth: int = 0) -> int:
-        """Select planner tier based on stagnation and depth.
-
-        Probabilities depend on node depth: shallow nodes favor Tier 2/3
-        (exploring distinct approaches), deep nodes favor Tier 1 (refining
-        a working approach).  See TIER_PROBS_AT_ROOT / TIER_PROBS_AT_DEEP.
-
-        If the target branch has stagnated for STAGNATION_TIER_ESCALATE or
-        more consecutive non-improvements, force Tier 2 or 3 (skip small
-        tweaks) regardless of depth.
-
-        Returns:
-            Integer 1 (tuning), 2 (components), or 3 (paradigm shift).
-        """
-        stagnation = self._parent_stagnation.get(target_node_id, 0)
-        if stagnation >= STAGNATION_TIER_ESCALATE:
-            tier = random.choice([2, 3])
-            _run_logger.info(
-                f"[Iter {self._iteration + 1}] Stagnation={stagnation} >= "
-                f"{STAGNATION_TIER_ESCALATE} — forced Tier {tier}"
-            )
-            return tier
-
-        # Linearly interpolate tier probabilities by depth.
-        f = min(1.0, depth / TIER_DEPTH_THRESHOLD)
-        p1 = TIER_PROBS_AT_ROOT[0] + f * (TIER_PROBS_AT_DEEP[0] - TIER_PROBS_AT_ROOT[0])
-        p2 = TIER_PROBS_AT_ROOT[1] + f * (TIER_PROBS_AT_DEEP[1] - TIER_PROBS_AT_ROOT[1])
-
-        r = random.random()
-        if r < p1:
-            tier = 1
-        elif r < p1 + p2:
-            tier = 2
-        else:
-            tier = 3
-        _run_logger.info(
-            f"[Iter {self._iteration + 1}] Stagnation={stagnation}, depth={depth} "
-            f"(p1={p1:.2f}, p2={p2:.2f}) — sampled Tier {tier}"
-        )
-        return tier
-
-    def _run_planner(self, feedback: str, tier: int = 1) -> tuple[str, str]:
+    def _run_planner(self, feedback: str) -> tuple[str, str]:
         """Run the planner stage: analyze feedback and produce a free-form plan.
 
         The planner reads the full feedback prompt and outputs a natural-language
@@ -1313,7 +1258,6 @@ class EvoRunAgent:
 
         Args:
             feedback: The formatted feedback string from _format_feedback().
-            tier: Planner tier — 1 (tuning), 2 (components), or 3 (paradigm shift).
 
         Returns:
             (planner_input_prompt, plan_text) — full prompt sent and output received.
@@ -1346,10 +1290,10 @@ class EvoRunAgent:
             "You have limited turns — be direct and focused. Do not enumerate multiple\n"
             "alternatives or discuss trade-offs. Pick the single best approach and commit.\n"
             "\n"
-            "ONE CHANGE ONLY: your plan must propose EXACTLY ONE change.  The tree\n"
-            "search will compose multiple changes across iterations — your job here\n"
-            "is to isolate a single hypothesis so its effect can be measured cleanly.\n"
-            "Do not bundle related tweaks; do not propose 'and also'.  One change.\n"
+            "ONE HYPOTHESIS: your plan must propose exactly ONE coherent idea.\n"
+            "Focus on a single hypothesis whose effect can be measured cleanly.\n"
+            "Make whatever edits are needed to implement that hypothesis — just\n"
+            "keep them focused on the single idea you're testing.\n"
         )
 
         # ── Random file nudge for diversity ──
@@ -1368,59 +1312,32 @@ class EvoRunAgent:
                 "This is a suggestion — if a different file is clearly a better target, go with that.\n"
             )
 
-        if tier == 1:
-            tier_header = (
-                "**Tier 1: Optimization** — keep the current architecture and data flow fixed.\n"
-                "Focus on: hyperparameters, learning rate schedules, random seeds,\n"
-                "post-processing thresholds, training epochs, batch sizes.\n"
-                "\n"
-                "Do NOT change the model architecture, loss function, or data pipeline.\n"
-            )
-            plan_structure = (
-                "## Plan Structure\n"
-                "\n"
-                "**Diagnosis**: What parameter/training issue is limiting performance?\n"
-                "\n"
-                "**Proposed Change** (exactly 1): a single, focused tuning adjustment\n"
-            )
-        elif tier == 2:
-            tier_header = (
-                "**Tier 2: Representation & Components** — change specific modules,\n"
-                "keep the overall paradigm.\n"
-                "\n"
-                "Focus on: swap backbone/model variant, change loss function,\n"
-                "add/remove regularization, new feature engineering, data augmentation,\n"
-                "input normalization.\n"
-            )
-            plan_structure = (
-                "## Plan Structure\n"
-                "\n"
-                "**Diagnosis**: Is the model underfitting, overfitting, or misaligned with data?\n"
-                "\n"
-                "**Proposed Change** (exactly 1): which single component to change and why\n"
-            )
-        else:  # tier == 3
-            tier_header = (
-                "**Tier 3: Systemic Paradigm Shift** — fundamentally change the approach.\n"
-                "The old code structure may need significant rewriting.\n"
-                "\n"
-                "Focus on: switching GBDT<->Neural Net, single model->ensemble,\n"
-                "regression->classification (binning), multi-task learning,\n"
-                "pseudo-labeling, self-supervised pretraining, completely new algorithm.\n"
-                "\n"
-                "Think big — do not get attached to the current approach.\n"
-            )
-            plan_structure = (
-                "## Plan Structure\n"
-                "\n"
-                "**Assessment**: What systemic limitation makes the current approach hit a ceiling?\n"
-                "\n"
-                "**Proposed Paradigm Shift** (exactly 1): the single new approach that replaces\n"
-                "the current one.  Describe the new paradigm and which files restructure to\n"
-                "implement it.  This is one change in spirit (the paradigm) even though it\n"
-                "may touch multiple files.  Do not stack a paradigm shift with unrelated\n"
-                "tuning or component swaps.\n"
-            )
+        scope_guide = (
+            "## Scope\n"
+            "Assess the feedback and decide the appropriate scope of change. "
+            "Choose one — Tuning, Components, or Architecture — and start "
+            "your plan with `Scope: <choice>`.\n"
+            "\n"
+            "- Tuning: Adjust thresholds, defaults, hyperparameters, constants,\n"
+            "  magic numbers, seeds, convergence tolerances, iteration counts.\n"
+            "- Components: Swap or rewrite subroutines, change loss/cost functions,\n"
+            "  replace heuristics, restructure data flow within a function,\n"
+            "  add/remove intermediate steps in a pipeline.\n"
+            "- Architecture: Redesign the overall approach, replace the core\n"
+            "  algorithm, restructure the data model, split or merge major modules.\n"
+            "\n"
+            "These are suggestions, not fences. If the feedback clearly calls for a\n"
+            "larger scope, escalate accordingly.\n"
+        )
+
+        plan_structure = (
+            "## Plan Structure\n"
+            "\n"
+            "**Diagnosis**: What is limiting performance and why?\n"
+            "\n"
+            "**Proposed Hypothesis** (exactly 1): the single idea you are testing.\n"
+            "Describe what to change and why.\n"
+        )
 
         planner_prompt = f"""\
 You are a code planning architect. Your job is to analyze evaluation results
@@ -1428,7 +1345,7 @@ and produce a focused plan for what changes to make.
 
 {common_rules}
 {file_nudge_section}
-{tier_header}
+{scope_guide}
 {plan_structure}
 
 Here is the feedback to analyze:
@@ -1791,7 +1708,7 @@ Do not try to improve the score — just fix the errors.
         self._last_modified_files = []
         self._last_added_files = []
         self._last_deleted_files = []
-        tier = 0  # 0 = not set (fusion/error path); 1-3 for normal planner
+        tier = 1  # default; updated by parsing planner output
 
         # ---- Step 0: Select node to expand (UCT across entire tree) ----
         target_branch_id = len(self.tree.root.children) + 1
@@ -2032,7 +1949,7 @@ Do not try to improve the score — just fix the errors.
 
         # Build feedback (always, for logging and next iteration)
         parent_score = target_node.parent.metric.value if target_node.parent and target_node.parent.metric else None
-        feedback = self._format_feedback(result, self._iteration + 1, tree_info, prev_eval, code_review_notes, debug_instructions, parent_score)
+        feedback = self._format_feedback(result, self._iteration + 1, tree_info, prev_eval, code_review_notes, debug_instructions, parent_score, target_node=target_node)
 
         if not (used_fusion and log_content) and not self.fake_run and not is_broken:
             # Two-stage: planner → editor
@@ -2042,11 +1959,13 @@ Do not try to improve the score — just fix the errors.
                     self.codebase.get_experiment_files(),
                 )
 
-                tier = self._select_planner_tier(
-                    target_node.id, depth=self.tree._node_depth(target_node)
-                )
+                planner_input, plan = self._run_planner(feedback)
+                # Parse self-selected scope from planner output for webapp display.
+                scope_match = re.search(r'(?:^|\n)Scope:\s*(Tuning|Components|Architecture)', plan or "", re.IGNORECASE)
+                if scope_match:
+                    scope_map = {"tuning": 1, "components": 2, "architecture": 3}
+                    tier = scope_map.get(scope_match.group(1).lower(), 1)
                 _run_logger.info(f"[Iter {self._iteration + 1}] Planner tier: {tier}")
-                planner_input, plan = self._run_planner(feedback, tier=tier)
                 planner_output = plan
                 editor_input = ""
                 if plan and plan.strip():
@@ -2875,6 +2794,7 @@ Do not try to improve the score — just fix the errors.
         code_review_notes: str = "",
         debug_instructions: str = "",
         parent_score: float | None = None,
+        target_node=None,
     ) -> str:
         """Format evaluation feedback for Claude CLI.
 
@@ -2958,12 +2878,13 @@ Do not try to improve the score — just fix the errors.
         if history_lines:
             parts.append("### Recent history\n" + "\n".join(history_lines))
 
+        # --- Lineage ---
+        if target_node is not None:
+            lineage_lines = self._format_lineage(target_node)
+            if lineage_lines:
+                parts.extend(lineage_lines)
 
-        # --- What was tried (anti-repetition) ---
-        tried_lines = self._format_previous_attempts()
-        if tried_lines:
-            parts.extend(tried_lines)
-            
+
         return "\n".join(parts)
 
     # ─── Fusion agent ───────────────────────────────────────────────
@@ -3332,23 +3253,6 @@ a messy combination of several.
             f"```\n{prev_eval.strip()[-MAX_PREV_EVAL_CHARS:]}\n```",
         ]
 
-    def _format_previous_attempts(self) -> list[str]:
-        """Format a summary of what was tried in recent iterations to prevent repetition.
-
-        Returns:
-            List of lines, or empty list if no relevant history.
-        """
-        if not self.history:
-            return []
-        recent = [e for e in self.history[-5:] if e.edit_summary]
-        if not recent:
-            return []
-        lines = ["## Previously tried approaches (do NOT repeat these)"]
-        for entry in recent:
-            score_str = f"score={entry.score:.4f}" if entry.score is not None else "broken"
-            lines.append(f"- Iter {entry.iter} ({score_str}): {entry.edit_summary}")
-        return lines
-
     def _format_result_info(self, result: EvalResult) -> list[str]:
         """Format result information (timeout, score, error, speed warnings).
 
@@ -3436,6 +3340,42 @@ a messy combination of several.
         lines.append("```\n")
         return lines
 
+    def _format_lineage(self, target_node) -> list[str]:
+        """Format the ancestor chain from target_node up to root.
+
+        Shows what happened at each step along this specific branch,
+        giving the planner context about how this node evolved.
+
+        Returns:
+            List of lines, or empty list if target_node has no parent chain.
+        """
+        if not target_node or target_node is self.tree.root:
+            return []
+        ancestors: list = []
+        cur = target_node.parent
+        while cur is not None:
+            ancestors.append(cur)
+            cur = cur.parent
+        if not ancestors:
+            return []
+        ancestors.reverse()  # root first
+
+        lines = ["## Lineage of this node"]
+        for node in ancestors:
+            prefix = "- root" if node is self.tree.root else f"- Iter {node.step}"
+            score_str = f"score={node.metric.value:.4f}" if node.metric and node.metric.value is not None else "no score"
+            dup_str = " (duplicate)" if node.is_duplicate else ""
+            summary = ""
+            if node is not self.tree.root and node.step is not None and node.step < len(self.history):
+                entry = self.history[node.step]
+                if entry.edit_summary:
+                    summary = f": {entry.edit_summary}"
+            stage_str = "" if node is self.tree.root else f", {node.stage}"
+            lines.append(f"{prefix} ({score_str}{stage_str}){dup_str}{summary}")
+        lines.append(f"- (current) Iter {target_node.step}")
+        lines.append("(The node at the top is the earliest ancestor; the current node is the tip of this branch.)")
+        return lines
+
     def _format_history_summary(self) -> list[str]:
         """Format full history summary.
 
@@ -3444,7 +3384,7 @@ a messy combination of several.
         """
         if not self.history:
             return []
-        recent = self.history
+        recent = self.history[-10:]
         history_lines: list[str] = []
 
         # Collect scored entries for trend analysis
@@ -3507,6 +3447,8 @@ a messy combination of several.
             if summary:
                 line += f" [{summary}]"
             history_lines.append(line)
+        history_lines.append("Consider what these reveal about the search — build on insights and")
+        history_lines.append("adjust rather than repeating the exact same change.")
         return history_lines
 
     def _build_task_context(self, task_content: str | None) -> list[str]:
