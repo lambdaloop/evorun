@@ -1872,6 +1872,7 @@ Do not try to improve the score — just fix the errors.
                             f"score={result.score:.4f}")
                 self.consecutive_timeouts = 0
             else:
+                _run_logger.info(f"[Iter {self._iteration}/{self.max_iters}] Starting baseline eval...")
                 result = self.evaluator.run()
                 _run_logger.info(f"[Iter {self._iteration}/{self.max_iters}] Baseline eval: "
                             f"score={result.score} (timed_out={result.timed_out}, "
