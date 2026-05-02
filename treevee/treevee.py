@@ -2970,7 +2970,7 @@ Do not try to improve the score — just fix the errors.
 
     def _find_fusion_candidates(self, target_node, max_candidates=2):
         """Find high-scoring fusion candidates from outside target's grandparent
-        family and ancestor chain.
+        family, ancestor chain, and descendant lineage.
 
         A candidate is eligible iff it has a score AND:
         1. Does NOT share a grandparent with the target (excludes the target
@@ -2978,10 +2978,14 @@ Do not try to improve the score — just fix the errors.
         2. Is NOT an ancestor of the target (excludes parent, grandparent, and
            all nodes on the path to root). Ancestors are earlier snapshots of
            the same lineage; fusing with them is regressive.
+        3. Is NOT a descendant of the target (excludes children, grandchildren,
+           etc.). The fused node is created as a child of the target, so its
+           siblings would be the target's existing descendants — fusing with
+           them would be circular, not cross-branch.
 
         None-grandparent (root and depth-1 nodes) is treated as a shared
         "no-grandparent" group, so depth-1 siblings cannot fuse with each
-        other. Target's own descendants remain eligible.
+        other.
 
         Args:
             target_node: The SearchNode being expanded.
@@ -3003,6 +3007,16 @@ Do not try to improve the score — just fix the errors.
             ancestors.add(id(cur))
             cur = cur.parent
 
+        # Collect all descendants of target_node — the fused child will be
+        # created as a child of target_node, so its siblings would be
+        # target_node's existing descendants. Exclude them all.
+        descendants: set = set()
+        stack = list(target_node.children)
+        while stack:
+            node = stack.pop()
+            descendants.add(id(node))
+            stack.extend(node.children)
+
         eligible = [
             node for node in self.tree.journal.nodes
             if node.id != target_node.id
@@ -3011,6 +3025,7 @@ Do not try to improve the score — just fix the errors.
             and node.metric.value is not None
             and not shares_grandparent(node)
             and id(node) not in ancestors
+            and id(node) not in descendants
         ]
         if not eligible:
             return []
