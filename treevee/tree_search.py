@@ -294,6 +294,7 @@ class TreeSearch:
         score: float | None,
         step: int,
         eval_output: str = "",
+        is_duplicate: bool = False,
     ) -> SearchNode:
         """Create a child of *parent* with the given eval score.
 
@@ -319,7 +320,8 @@ class TreeSearch:
             branch_id = parent.branch_id
 
         child = SearchNode(code="", plan=f"improve from node {parent.id[:8]}",
-                           stage="improve", parent=parent)
+                           stage="improve", parent=parent,
+                           is_duplicate=is_duplicate)
         child.step = step
         child.branch_id = branch_id
         child.eval_output = eval_output
@@ -500,6 +502,7 @@ class TreeSearch:
                 "visits": node.visits, "total_reward": node.total_reward,
                 "branch_id": node.branch_id, "step": node.step,
                 "fusion_source_ids": getattr(node, "fusion_source_ids", []),
+                "is_duplicate": node.is_duplicate,
             })
         depth: int = self._compute_depth(self.root)
 

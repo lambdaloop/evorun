@@ -99,6 +99,13 @@ function renderIterations() {
       row.appendChild(badge);
     }
 
+    if (node.is_duplicate) {
+      const badge = document.createElement('span');
+      badge.className = 'iteration-badge badge-duplicate';
+      badge.textContent = 'DUP';
+      row.appendChild(badge);
+    }
+
     const summary = document.createElement('span');
     summary.className = 'iteration-summary';
     if (histEntry?.edit_summary) {

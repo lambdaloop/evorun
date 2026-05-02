@@ -2147,6 +2147,27 @@ Do not try to improve the score — just fix the errors.
         if diff_text:
             self._submit_edit_summary(diff_text, self._iteration)
 
+        # ---- Save snapshot and check for duplicates BEFORE child eval ----
+        child_code = ""
+        is_dup = False
+        pre_snap_dir = None
+        if not self.fake_run:
+            # Save snapshot with a temporary name (before we know the child's ID).
+            pre_snap_name = f"iter_snapshot_pre_{self._iteration}"
+            pre_snap_dir = self._save_node_snapshot(
+                target_node, self._iteration, dir_name=pre_snap_name,
+            )
+            _run_logger.info(
+                f"[Snapshot] Saved pre-child snapshot "
+                f"({pre_snap_name})"
+            )
+
+            # Check for duplicate code on disk.
+            child_code = ""
+            is_dup, child_code = self._check_duplicate_on_disk()
+            if is_dup:
+                child_code = ""  # clear for hash tracking below
+
         # ---- Step 6: Run eval on improved code (child score) ----
         child_score: float | None = None
         child_node: Any | None = None
@@ -2162,7 +2183,15 @@ Do not try to improve the score — just fix the errors.
         no_changes = (
             not modified_files and not added_files and not deleted_files
         )
-        if self.fake_run:
+
+        if is_dup:
+            # Duplicate code — reuse parent's score, skip running expensive eval.
+            child_score = parent_score
+            _run_logger.info(
+                f"[Iter {self._iteration}] Duplicate code detected — "
+                f"reusing parent score: {parent_score}"
+            )
+        elif self.fake_run:
             child_score = self._generate_fake_score(parent_score=parent_score, parent_node=target_node)
             score_str = f"{child_score:.4f}" if child_score is not None else "None"
             _run_logger.info(f"[Iter {self._iteration}] Fake child score: {score_str}")
@@ -2195,62 +2224,7 @@ Do not try to improve the score — just fix the errors.
         else:
             self.consecutive_timeouts = 0
 
-        # ---- Save snapshot and check for duplicates BEFORE creating child node ----
-        # This prevents duplicate nodes from being added to the tree.
-        child_code = ""
-        is_dup = False
-        pre_snap_dir = None
-        if not self.fake_run:
-            # Save snapshot with a temporary name (before we know the child's ID).
-            pre_snap_name = f"iter_snapshot_pre_{self._iteration}"
-            pre_snap_dir = self._save_node_snapshot(
-                target_node, self._iteration, dir_name=pre_snap_name,
-            )
-            _run_logger.info(
-                f"[Snapshot] Saved pre-child snapshot "
-                f"({pre_snap_name})"
-            )
-
-            # Check for duplicate code on disk.
-            child_code = ""
-            is_dup, child_code = self._check_duplicate_on_disk()
-            if is_dup:
-                child_code = ""  # clear for hash tracking below
-
-        # If duplicate, skip child creation entirely (don't add to tree).
-        if is_dup:
-            _run_logger.info(
-                f"[Iter {self._iteration}] Duplicate code detected — "
-                f"skipping node creation"
-            )
-            # Clean up temp snapshot.
-            if pre_snap_dir:
-                try:
-                    shutil.rmtree(pre_snap_dir)
-                except OSError:
-                    pass
-            # Do NOT increment parent stagnation for duplicate code — the LLM
-            # repeated a previously-seen solution, which is an LLM failure not
-            # a parent failure.  The consecutive_no_changes counter covers this.
-            # Record as a duplicate iteration (full I/O preserved for inspection)
-            self.history.append(HistoryEntry(
-                iter=self._iteration, score=None,
-                timed_out=False, exec_time=0.0,
-                datetime=datetime.now().isoformat(),
-                files_modified=[], files_added=[], files_deleted=[],
-                llm_response="", edit_summary="", diff_text="",
-                planner_input=(planner_input or "").strip(),
-                planner_output=(planner_output or "").strip(),
-                editor_input=(editor_input or "").strip(),
-                editor_output=(log_content or "").strip(),
-                is_duplicate=True,
-                tier=tier,
-            ))
-            self._iteration += 1
-            self.save_state()
-            return
-
-        # Not a duplicate — create the child node and finalize snapshot.
+        # Create the child node and finalize snapshot.
         child_output = (
             getattr(child_result, "output", [])
             if not self.fake_run and child_result else []
@@ -2260,6 +2234,7 @@ Do not try to improve the score — just fix the errors.
             score=child_score,
             step=self._iteration,
             eval_output="\n".join(child_output),
+            is_duplicate=is_dup,
         )
         child_node._term_out = child_output
         if used_fusion:
@@ -2267,7 +2242,8 @@ Do not try to improve the score — just fix the errors.
             child_node.fusion_source_ids = fusion_source_ids
 
         _run_logger.info(f"[Iter {self._iteration}] Child created: "
-                    f"node {child_node.id[:8]} with score={child_score}")
+                    f"node {child_node.id[:8]} with score={child_score}"
+                    f"{' (duplicate)' if is_dup else ''}")
 
         # Log summary line
         if log_content:
@@ -2318,6 +2294,7 @@ Do not try to improve the score — just fix the errors.
             editor_input=(editor_input or "").strip(),
             editor_output=(log_content or "").strip(),
             tier=tier,
+            is_duplicate=is_dup,
         ))
 
         # Update global best if child score improves (respects optim-mode).
@@ -2334,27 +2311,32 @@ Do not try to improve the score — just fix the errors.
 
         # Update per-parent stagnation for child score.
         # Tracks consecutive non-improving children per parent node.
-        stagnation_parent_id = target_node.id
-        parent_score = (
-            target_node.metric.value if target_node.metric else None
-        )
+        #
+        # For duplicate code, don't increment stagnation — the LLM repeated a
+        # previously-seen solution, which is an LLM failure not a parent failure.
+        # The consecutive_no_changes counter covers this.
+        if not is_dup:
+            stagnation_parent_id = target_node.id
+            parent_score = (
+                target_node.metric.value if target_node.metric else None
+            )
 
-        if child_score is not None and parent_score is not None:
-            improved = (child_score > parent_score) if self.tree.maximize else (child_score < parent_score)
-            if improved:
+            if child_score is not None and parent_score is not None:
+                improved = (child_score > parent_score) if self.tree.maximize else (child_score < parent_score)
+                if improved:
+                    self._parent_stagnation[stagnation_parent_id] = 0
+                else:
+                    self._parent_stagnation[stagnation_parent_id] = (
+                        self._parent_stagnation.get(stagnation_parent_id, 0) + 1
+                    )
+            elif child_score is not None and parent_score is None:
+                # Parent was broken; child produced a valid score — treat as improvement.
                 self._parent_stagnation[stagnation_parent_id] = 0
-            else:
+            elif child_score is None:
+                # Claude produced no change or eval returned no score — stagnation.
                 self._parent_stagnation[stagnation_parent_id] = (
                     self._parent_stagnation.get(stagnation_parent_id, 0) + 1
                 )
-        elif child_score is not None and parent_score is None:
-            # Parent was broken; child produced a valid score — treat as improvement.
-            self._parent_stagnation[stagnation_parent_id] = 0
-        elif child_score is None:
-            # Claude produced no change or eval returned no score — stagnation.
-            self._parent_stagnation[stagnation_parent_id] = (
-                self._parent_stagnation.get(stagnation_parent_id, 0) + 1
-            )
 
         # Check if ALL parents have been stagnant — stop entire run.
         # Only parents that have been expanded (produced children) are tracked.

@@ -48,6 +48,9 @@ const stageColorsDark = {
 const defaultColor = '#d4b0e8';
 const defaultColorDark = '#3a1f5c';
 
+const duplicateColor = '#6b6b6b';
+const duplicateColorDark = '#3a3a3a';
+
 const stageEmojis = {
   root: '🌸',
   improve: '✨',
@@ -63,6 +66,10 @@ const improveTierEmojis = {
 };
 
 function getNodeEmoji(node) {
+  // Duplicate nodes get a recycle emoji.
+  if (node.is_duplicate) {
+    return '♻️';
+  }
   // Fix nodes (child of an error node) — check before self-error since
   // a fix can fail and have null score too.
   if (node.parent_id && node.stage !== 'root') {
@@ -191,6 +198,7 @@ function renderTree() {
     { emoji: '🐛', label: 'Debug / Fix' },
     { emoji: '🧬', label: 'Fusion' },
     { emoji: '💥', label: 'Error' },
+    { emoji: '♻️', label: 'Duplicate' },
   ];
   for (const { emoji, label } of legendEntries) {
     const item = document.createElement('div');
@@ -305,7 +313,7 @@ function renderTree() {
   // Background circle
   nodeG.append('circle')
     .attr('r', d => d.data.id === '__synthetic__' ? 0 : 20)
-    .attr('fill', d => d.data.id === '__synthetic__' ? 'none' : (stageColorsDark[d.data.stage] || defaultColorDark))
+    .attr('fill', d => d.data.id === '__synthetic__' ? 'none' : (d.data.is_duplicate ? duplicateColorDark : (stageColorsDark[d.data.stage] || defaultColorDark)))
     .attr('stroke', d => {
       if (d.data.id === '__synthetic__') return 'none';
       if (StateLoader.isBestNode(d.data.id)) return 'var(--accent-mint)';
@@ -379,7 +387,8 @@ function renderTree() {
         ? `<div class="tt-summary">${escapeHtml(histEntry.edit_summary)}</div>`
         : '';
 
-      tooltip.innerHTML = `<div class="tt-header">${getNodeEmoji(d.data)} ${d.data.stage} #${d.data.step}</div>${scoreHtml}${summaryHtml}`;
+      const dupLabel = d.data.is_duplicate ? ' (duplicate)' : '';
+      tooltip.innerHTML = `<div class="tt-header">${getNodeEmoji(d.data)} ${d.data.stage}${dupLabel} #${d.data.step}</div>${scoreHtml}${summaryHtml}`;
       tooltip.style.display = 'block';
       positionTooltip(tooltip, event);
     })

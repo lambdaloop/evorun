@@ -45,6 +45,7 @@ class SearchNode(DataClassJsonMixin):
     branch_id: Optional[int] = field(default=None, kw_only=True)
     eval_output: str = field(default="", kw_only=True)
     fusion_source_ids: list = field(default_factory=list, kw_only=True)
+    is_duplicate: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
         if self.parent is not None:
