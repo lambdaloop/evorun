@@ -8,7 +8,7 @@ max_iters = 50
 time_limit = 0
 patience = 10
 eval_timeout = 300
-max_children = 10
+max_children = 6
 decay_exploration = true
 
 use_fusion = true

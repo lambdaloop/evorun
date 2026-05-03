@@ -7,10 +7,6 @@
 #   --model CLI flag, or
 #   ~/.config/treevee/treevee.toml (planner/editor sections)
 
-# ── LLM ──────────────────────────────────────────────────────────
-llm_retries = 9             # Retry LLM query on failure (triple backoff, ~4.6h cumulative)
-llm_retry_base_delay = 5.0  # Base delay (s) for exponential backoff (default: 5.0)
-
 # ── Search ───────────────────────────────────────────────────────
 eval_cmd = "pixi run python eval.py"  # Evaluation command to run
 optim_mode = "min"                     # Optimization direction: "max" or "min" (default: "min")
@@ -18,8 +14,9 @@ max_iters = 50                         # Maximum number of iterations (default: 
 time_limit = 0                         # Wall-clock time limit in seconds, 0 = no limit
 patience = 10                          # Stagnation threshold per branch (default: 10)
 eval_timeout = 300                     # Timeout per evaluation run in seconds (default: 300)
-max_children = 10                      # Maximum child expansions per node (default: 10)
-decay_exploration = true               # Enable progressive UCT exploration decay (default: true)
+max_children = 6                      # Maximum child expansions per node (default: 6)
+decay_exploration = true               # Enable progressive UCT exploration decay (default: false)
+explore_c = 0.22                       # Static exploration constant when decay is disabled (default: 0.22)
 
 # ── Fusion ───────────────────────────────────────────────────────
 use_fusion = true         # Enable cross-branch fusion agent (default: true)

@@ -909,7 +909,7 @@ class EvoRunAgent:
         self.editor_api_key = editor_cfg.get("api_key", None)
 
         # Tree search max children
-        self.tree_max_children = getattr(args, 'max_children', 10)
+        self.tree_max_children = getattr(args, 'max_children', 6)
         self.optim_mode = getattr(args, 'optim_mode', 'min')
         self.tree = TreeSearch(maximize=(self.optim_mode == "max"), max_children=self.tree_max_children)
 
@@ -3617,7 +3617,7 @@ a messy combination of several.
 
 # Default values for argparse arguments (used to detect if CLI was explicitly set).
 _ARGPARSE_DEFAULTS: dict[str, Any] = {
-    "max_children": 7,
+    "max_children": 6,
     "optim_mode": "min",
     "max_iters": 50,
     "time_limit": 0,
@@ -3721,8 +3721,8 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
     )
     subparser.add_argument(
         "--max-children",
-        type=int, default=10,
-        help="Maximum child expansions per node in the tree (default: 10)"
+        type=int, default=6,
+        help="Maximum child expansions per node in the tree (default: 6)"
     )
     subparser.add_argument(
         "--optim-mode",
@@ -4151,7 +4151,7 @@ def _cmd_init(args: argparse.Namespace) -> None:
             "time_limit = 0\n"
             "patience = 10\n"
             "eval_timeout = 300\n"
-            "max_children = 10\n"
+            "max_children = 6\n"
             "decay_exploration = false\n"
             "use_fusion = true\n"
             "fusion_min_iters = 10\n"
@@ -4302,7 +4302,7 @@ Key settings (all have defaults):
 | `max_iters` | 50 | Number of optimization iterations |
 | `patience` | 10 | Stop if no improvement after N iters |
 | `eval_timeout` | 300 | Timeout per eval in seconds |
-| `max_children` | 10 | Max children per tree node |
+| `max_children` | 6 | Max children per tree node |
 | `llm_retries` | 9 | Retries on LLM errors (triple backoff, ~4.6h cumulative) |
 | `decay_exploration` | false | Reduce exploration over time |
 | `use_fusion` | true | Enable cross-branch technique fusion |

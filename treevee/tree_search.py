@@ -30,7 +30,7 @@ logger = logging.getLogger("treevee")
 
 # Maximum number of child expansions per non-root node before it's
 # considered "fully expanded" (for stopping the search on that branch).
-_DEFAULT_MAX_CHILDREN = 10
+_DEFAULT_MAX_CHILDREN = 6
 
 # UCT -- "Upper Confidence Bound applied to Trees", exploration constant.
 # Controls the exploration vs. exploitation trade-off:
