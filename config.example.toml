@@ -21,7 +21,7 @@ explore_c = 0.22                       # Static exploration constant when decay 
 # ── Fusion ───────────────────────────────────────────────────────
 use_fusion = true         # Enable cross-branch fusion agent (default: true)
 fusion_min_iters = 10     # Minimum iterations before fusion is allowed (default: 10)
-fusion_prob = 0.5         # Probability of using fusion after min iters (default: 0.5)
+fusion_prob = 0.25         # Probability of using fusion after min iters (default: 0.25)
 
 # ── Sandboxing ───────────────────────────────────────────────────
 sandbox = true             # Run eval inside the platform-native sandbox (default: true)

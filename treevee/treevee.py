@@ -918,7 +918,7 @@ class EvoRunAgent:
         self.explore_c_static = getattr(args, 'explore_c', 0.22)  # Static C when decay is disabled
         self.use_fusion = getattr(args, 'use_fusion', True)
         self.fusion_min_iters = getattr(args, 'fusion_min_iters', 10)
-        self.fusion_prob = getattr(args, 'fusion_prob', 0.5)
+        self.fusion_prob = getattr(args, 'fusion_prob', 0.25)
         self._start_time = time.time()
 
         # Optimization parameters (must be set before _get_decay_exploration_c)
@@ -3629,7 +3629,7 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "eval_cmd": None,
     "use_fusion": True,
     "fusion_min_iters": 10,
-    "fusion_prob": 0.5,
+    "fusion_prob": 0.25,
     "verbose": False,
     "sandbox": True,
     "allow_network": True,
@@ -3800,7 +3800,7 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--fusion-prob",
         type=float,
-        default=0.5,
+        default=0.25,
         help="Probability of using fusion after fusion_min_iters (default: 0.5)",
     )
     subparser.add_argument(
@@ -4155,7 +4155,7 @@ def _cmd_init(args: argparse.Namespace) -> None:
             "decay_exploration = false\n"
             "use_fusion = true\n"
             "fusion_min_iters = 10\n"
-            "fusion_prob = 0.5\n"
+            "fusion_prob = 0.25\n"
             "fake_run = false\n"
             "reset = false\n",
         )
@@ -4307,7 +4307,7 @@ Key settings (all have defaults):
 | `decay_exploration` | false | Reduce exploration over time |
 | `use_fusion` | true | Enable cross-branch technique fusion |
 | `fusion_min_iters` | 10 | Min iters before fusion starts |
-| `fusion_prob` | 0.5 | Probability of fusion vs normal improvement |
+| `fusion_prob` | 0.25 | Probability of fusion vs normal improvement |
 
 ---
 

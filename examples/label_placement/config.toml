@@ -13,7 +13,7 @@ decay_exploration = true
 
 use_fusion = true
 fusion_min_iters = 10
-fusion_prob = 0.5
+fusion_prob = 0.25
 
 fake_run = false
 reset = false
