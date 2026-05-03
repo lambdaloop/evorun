@@ -155,6 +155,8 @@ class HistoryEntry:
     editor_output: str = ""
     is_duplicate: bool = False
     tier: int = 1
+    hypothesis: str | None = None
+    outcome: str | None = None
 
 
 # ────────────────────────────────────────────────────────────
@@ -1055,6 +1057,8 @@ class EvoRunAgent:
                 editor_output=e.get("editor_output", ""),
                 is_duplicate=e.get("is_duplicate", False),
                 tier=e.get("tier", 1),
+                hypothesis=e.get("hypothesis"),
+                outcome=e.get("outcome"),
             )
             all_history.append(h)
         # Only keep history from the current session (iterations < next_iteration)
@@ -1290,6 +1294,10 @@ class EvoRunAgent:
             "You have limited turns — be direct and focused. Do not enumerate multiple\n"
             "alternatives or discuss trade-offs. Pick the single best approach and commit.\n"
             "\n"
+            "SCIENTIFIC METHOD: treat each iteration as a hypothesis test.\n"
+            "You can only hypothesize — only execution results validate or falsify.\n"
+            "If an ancestor's hypothesis is marked FALSIFIED in the lineage, do not repeat it.\n"
+            "\n"
             "ONE HYPOTHESIS: your plan must propose exactly ONE coherent idea.\n"
             "Focus on a single hypothesis whose effect can be measured cleanly.\n"
             "Make whatever edits are needed to implement that hypothesis — just\n"
@@ -1335,7 +1343,8 @@ class EvoRunAgent:
             "\n"
             "**Diagnosis**: What is limiting performance and why?\n"
             "\n"
-            "**Proposed Hypothesis** (exactly 1): the single idea you are testing.\n"
+            '**Hypothesis** (one sentence): State a single falsifiable prediction, e.g.\n'
+            '"If I [change X], then [metric] will [improve] because [reasoning]."\n'
             "\n"
             "**Implementation**: Which specific file(s) to modify and what change(s) to make.\n"
             "Describe the edit concretely so the editor can execute it directly.\n"
@@ -1711,6 +1720,7 @@ Do not try to improve the score — just fix the errors.
         self._last_added_files = []
         self._last_deleted_files = []
         tier = 1  # default; updated by parsing planner output
+        hypothesis: str | None = None
 
         # ---- Step 0: Select node to expand (UCT across entire tree) ----
         target_branch_id = len(self.tree.root.children) + 1
@@ -1968,6 +1978,9 @@ Do not try to improve the score — just fix the errors.
                     scope_map = {"tuning": 1, "components": 2, "architecture": 3}
                     tier = scope_map.get(scope_match.group(1).lower(), 1)
                 _run_logger.info(f"[Iter {self._iteration + 1}] Planner tier: {tier}")
+                hyp_match = re.search(r'\*\*Hypothesis\*\*[^:\n]*:\s*"?([^\n"]+)', plan or "")
+                if hyp_match:
+                    hypothesis = hyp_match.group(1).strip()
                 planner_output = plan
                 editor_input = ""
                 if plan and plan.strip():
@@ -2217,6 +2230,16 @@ Do not try to improve the score — just fix the errors.
                 self._seen_code_hashes.add(self._compute_code_hash(final_code))
                 child_node.code = final_code
 
+        # Classify hypothesis outcome: VALIDATED / FALSIFIED / INCONCLUSIVE.
+        _parent_score = target_node.metric.value if target_node.metric else None
+        if child_score is not None and _parent_score is not None:
+            if self.tree.maximize:
+                _outcome = "VALIDATED" if child_score > _parent_score else ("FALSIFIED" if child_score < _parent_score else "INCONCLUSIVE")
+            else:
+                _outcome = "VALIDATED" if child_score < _parent_score else ("FALSIFIED" if child_score > _parent_score else "INCONCLUSIVE")
+        else:
+            _outcome = None
+
         # Record HistoryEntry for this child expansion.
         self.history.append(HistoryEntry(
             iter=self._iteration, score=child_score,
@@ -2235,6 +2258,8 @@ Do not try to improve the score — just fix the errors.
             editor_output=(log_content or "").strip(),
             tier=tier,
             is_duplicate=is_dup,
+            hypothesis=hypothesis,
+            outcome=_outcome,
         ))
 
         # Update global best if child score improves (respects optim-mode).
@@ -2386,6 +2411,8 @@ Do not try to improve the score — just fix the errors.
                 "editor_input": e.editor_input,
                 "editor_output": e.editor_output,
                 "tier": e.tier,
+                "hypothesis": e.hypothesis,
+                "outcome": e.outcome,
             })
         # Derive next_iteration from tree structure to stay in sync with history
         max_step = max((n.step for n in self.tree.journal.nodes), default=0)
@@ -2864,7 +2891,7 @@ Do not try to improve the score — just fix the errors.
         # --- History summary ---
         history_lines = self._format_history_summary()
         if history_lines:
-            parts.append("### Recent history\n" + "\n".join(history_lines))
+            parts.append("### Search progress\n" + "\n".join(history_lines))
 
         # --- Lineage ---
         if target_node is not None:
@@ -3348,6 +3375,8 @@ a messy combination of several.
 
         Shows what happened at each step along this specific branch,
         giving the planner context about how this node evolved.
+        Each entry includes hypothesis and validated/falsified outcome
+        when available, and the section ends with a scope histogram.
 
         Returns:
             List of lines, or empty list if target_node has no parent chain.
@@ -3363,96 +3392,75 @@ a messy combination of several.
             return []
         ancestors.reverse()  # root first
 
+        tier_names = {1: "tuning", 2: "components", 3: "architecture"}
         lines = ["## Lineage of this node"]
         for node in ancestors:
-            prefix = "- root" if node is self.tree.root else f"- Iter {node.step}"
+            if node is self.tree.root:
+                lines.append("- root")
+                continue
             score_str = f"score={node.metric.value:.4f}" if node.metric and node.metric.value is not None else "no score"
             dup_str = " (duplicate)" if node.is_duplicate else ""
-            summary = ""
-            if node is not self.tree.root and node.step is not None and node.step < len(self.history):
-                entry = self.history[node.step]
-                if entry.edit_summary:
-                    summary = f": {entry.edit_summary}"
-            stage_str = "" if node is self.tree.root else f", {node.stage}"
-            lines.append(f"{prefix} ({score_str}{stage_str}){dup_str}{summary}")
+            stage_str = f", {node.stage}" if node.stage else ""
+            entry = self.history[node.step] if node.step is not None and node.step < len(self.history) else None
+            tier_str = f", {tier_names.get(entry.tier, 'unknown')}" if entry else ""
+            lines.append(f"- Iter {node.step} ({score_str}{stage_str}{tier_str}){dup_str}")
+            if entry:
+                if entry.hypothesis:
+                    lines.append(f"  Hypothesis: {entry.hypothesis}")
+                if entry.outcome:
+                    if (node.metric and node.metric.value is not None
+                            and node.parent and node.parent.metric
+                            and node.parent.metric.value is not None):
+                        delta = node.metric.value - node.parent.metric.value
+                        lines.append(
+                            f"  Outcome:    {entry.outcome} — "
+                            f"score {node.parent.metric.value:.4f} → {node.metric.value:.4f} ({delta:+.4f})."
+                        )
+                    else:
+                        lines.append(f"  Outcome:    {entry.outcome}.")
+                elif entry.edit_summary:
+                    lines.append(f"  Summary: {entry.edit_summary}")
         lines.append(f"- (current) Iter {target_node.step}")
         lines.append("(The node at the top is the earliest ancestor; the current node is the tip of this branch.)")
+
+        # Scope histogram across ancestors
+        tier_counts: dict[int, int] = {}
+        for node in ancestors:
+            if node is not self.tree.root and node.step is not None and node.step < len(self.history):
+                t = self.history[node.step].tier
+                tier_counts[t] = tier_counts.get(t, 0) + 1
+        if tier_counts:
+            hist_parts = [f"{count}× {tier_names.get(t, 'unknown')}" for t, count in sorted(tier_counts.items())]
+            lines.append(f"Lineage scope distribution: {', '.join(hist_parts)}.")
         return lines
 
     def _format_history_summary(self) -> list[str]:
-        """Format full history summary.
+        """Return a global stagnation signal derived from all history.
 
         Returns:
-            List of history summary lines, or empty list if no history.
+            Single-item list with the global best and how long it has been
+            unchanged, or empty list if there is no history yet.
         """
-        if not self.history:
+        if not self.history or self.best_score is None:
             return []
-        recent = self.history[-10:]
-        history_lines: list[str] = []
-
-        # Collect scored entries for trend analysis
-        scored = [e for e in recent if e.score is not None]
-        if len(scored) >= 2:
-            scores = [e.score for e in scored]
-            first_half = scores[:len(scores)//2]
-            second_half = scores[len(scores)//2:]
-            avg_first = sum(first_half) / len(first_half)
-            avg_second = sum(second_half) / len(second_half)
-            delta = avg_second - avg_first
-            if self.tree.maximize:
-                if delta > 0.005:
-                    trend = f"Trend: improving (+{delta:.4f} avg over last {len(scored)})"
-                elif delta < -0.005:
-                    trend = f"Trend: declining ({delta:+.4f} avg over last {len(scored)})"
-                else:
-                    trend = f"Trend: stagnant ({delta:+.4f} avg over last {len(scored)})"
-            else:
-                if delta < -0.005:
-                    trend = f"Trend: improving ({delta:+.4f} avg over last {len(scored)})"
-                elif delta > 0.005:
-                    trend = f"Trend: declining ({delta:+.4f} avg over last {len(scored)})"
-                else:
-                    trend = f"Trend: stagnant ({delta:+.4f} avg over last {len(scored)})"
-            history_lines.append(trend)
-
-            # Highlight best iteration
-            best_entry = max(scored, key=lambda e: e.score if self.tree.maximize else -e.score)
-            history_lines.append(
-                f"Best: Iter {best_entry.iter} (score={best_entry.score:.4f})"
-            )
-
-        for entry in recent:
-            et = entry.exec_time if entry.exec_time is not None else 0.0
-            summary = entry.edit_summary
-            file_parts: list[str] = []
-            if entry.files_modified:
-                file_parts.append(f"~{len(entry.files_modified)} modified")
-            if entry.files_added:
-                file_parts.append(f"+{len(entry.files_added)} added")
-            if entry.files_deleted:
-                file_parts.append(f"-{len(entry.files_deleted)} deleted")
-            file_str = ", ".join(file_parts) if file_parts else ""
-            ts = ""
-            if entry.datetime:
-                try:
-                    ts = datetime.fromisoformat(entry.datetime).strftime("%H:%M:%S")
-                except (ValueError, TypeError):
-                    pass
-            time_str = f" [{ts}]" if ts else ""
-            if entry.timed_out:
-                line = f"Iter {entry.iter}: timed out ({et:.0f}s){time_str}"
-            elif entry.score is not None:
-                line = f"Iter {entry.iter}: score={entry.score:.4f} ({et:.0f}s){time_str}"
-            else:
-                line = f"Iter {entry.iter}: no score ({et:.0f}s){time_str}"
-            if file_str:
-                line += f" [{file_str}]"
-            if summary:
-                line += f" [{summary}]"
-            history_lines.append(line)
-        history_lines.append("Consider what these reveal about the search — build on insights and")
-        history_lines.append("adjust rather than repeating the exact same change.")
-        return history_lines
+        # Find the last history index that achieved or improved the global best.
+        best_idx = None
+        for i, entry in enumerate(self.history):
+            if entry.score is not None:
+                is_best = (
+                    (entry.score >= self.best_score) if self.tree.maximize
+                    else (entry.score <= self.best_score)
+                )
+                if is_best:
+                    best_idx = i
+        stagnant_for = (len(self.history) - best_idx - 1) if best_idx is not None else len(self.history)
+        score_str = f"{self.best_score:.4f}"
+        if stagnant_for == 0:
+            return [f"Global best: {score_str} (achieved this iteration)."]
+        elif stagnant_for == 1:
+            return [f"Global best: {score_str}, unchanged for 1 iteration."]
+        else:
+            return [f"Global best: {score_str}, unchanged for {stagnant_for} iterations."]
 
     def _build_task_context(self, task_content: str | None) -> list[str]:
         """Build task-specific context from the loaded TASK.md file.
