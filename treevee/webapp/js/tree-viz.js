@@ -166,15 +166,18 @@ const NODE_H = 120;
 const MARGIN = { top: 30, right: 80, bottom: 40, left: 80 };
 
 function renderTree() {
-  const nodes = StateLoader.getNodes();
+  // Exclude duplicate nodes from the tree visualization (they clutter the tree).
+  // They remain visible in the iterations list.
+  const filteredNodes = StateLoader.getNodes().filter(n => !n.is_duplicate);
   const container = document.getElementById('tree-container');
   container.innerHTML = '';
 
-  if (nodes.length === 0) {
+  if (filteredNodes.length === 0) {
     container.innerHTML = '<p style="color:var(--text-muted); padding:16px; text-align:center;">No tree data yet~ (｡•́︿•̀｡) <br><span style="font-size:15px;opacity:0.6;">the tree is sleeping... 🌸💤</span></p>';
     return;
   }
 
+  const nodes = filteredNodes;
   const roots = buildTree(nodes);
   const bestNodeId = StateLoader.getBestNodeId();
   const pathSet = bestNodeId ? getBestPathNodeIds(bestNodeId, nodes) : new Set();
@@ -198,7 +201,6 @@ function renderTree() {
     { emoji: '🐛', label: 'Debug / Fix' },
     { emoji: '🧬', label: 'Fusion' },
     { emoji: '💥', label: 'Error' },
-    { emoji: '♻️', label: 'Duplicate' },
   ];
   for (const { emoji, label } of legendEntries) {
     const item = document.createElement('div');
