@@ -180,12 +180,15 @@ class TreeSearch:
         expandable_nodes = [
             node for node in self.journal.nodes
             if node.num_children < self.max_children
+            and not node.is_duplicate
         ]
 
         if not expandable_nodes:
             # No node can expand more -- pick highest-Q node overall.
+            # Exclude duplicates since they contain no new code to build on.
+            non_dup_nodes = [n for n in self.journal.nodes if not n.is_duplicate]
             return max(
-                self.journal.nodes,
+                non_dup_nodes,
                 key=lambda n: n.total_reward,
             )
 

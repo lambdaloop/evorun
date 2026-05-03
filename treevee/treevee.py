@@ -1735,7 +1735,7 @@ Do not try to improve the score — just fix the errors.
         all_blocked = all(
             n.num_children >= self.tree.max_children
             for n in self.tree.journal.nodes
-            if n is not self.tree.root
+            if n is not self.tree.root and not n.is_duplicate
         )
         if all_blocked and self.tree.root.num_children >= self.tree.max_children:
             _run_logger.info(f"[Stop] No expandable nodes left — dead tree after "
