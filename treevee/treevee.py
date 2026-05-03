@@ -75,11 +75,16 @@ MAX_OUTPUT_LINE_LEN = 200
 # Stagnation / no-change detection.
 MAX_CONSECUTIVE_NO_CHANGES = 3
 
-# Planner tier probabilities — depth-dependent.
+# Tier definitions — used for display and root-level scope forcing.
 # Tier 1: small tweaks (hyperparameters, seeds, thresholds)
 # Tier 2: component changes (swap loss/backbone, add regularization, feature engineering)
 # Tier 3: paradigm shift (new algorithm, architectural rewrite, ensemble, GBDT<->NN)
-#
+
+# Probability of forcing Architecture (tier 3) scope at root level.
+_FORCE_ARCHITECTURE_PROB = 0.25
+# Probability at non-root levels.
+_FORCE_ARCHITECTURE_DEEP_PROB = 0.10
+
 # Response truncation limits.
 MAX_LLM_RESPONSE_SUMMARY = 300
 MAX_EDIT_SUMMARY_CHARS = 100
@@ -1253,7 +1258,7 @@ class EvoRunAgent:
         needs_fix = len(review_notes) > 0
         return needs_fix, "\n".join(review_notes)
 
-    def _run_planner(self, feedback: str) -> tuple[str, str]:
+    def _run_planner(self, feedback: str, force_architecture: bool = False) -> tuple[str, str]:
         """Run the planner stage: analyze feedback and produce a free-form plan.
 
         The planner reads the full feedback prompt and outputs a natural-language
@@ -1320,23 +1325,34 @@ class EvoRunAgent:
                 "This is a suggestion — if a different file is clearly a better target, go with that.\n"
             )
 
-        scope_guide = (
-            "## Scope\n"
-            "Assess the feedback and decide the appropriate scope of change. "
-            "Choose one — Tuning, Components, or Architecture — and start "
-            "your plan with `Scope: <choice>`.\n"
-            "\n"
-            "- Tuning: Adjust thresholds, defaults, hyperparameters, constants,\n"
-            "  magic numbers, seeds, convergence tolerances, iteration counts.\n"
-            "- Components: Swap or rewrite subroutines, change loss/cost functions,\n"
-            "  replace heuristics, restructure data flow within a function,\n"
-            "  add/remove intermediate steps in a pipeline.\n"
-            "- Architecture: Redesign the overall approach, replace the core\n"
-            "  algorithm, restructure the data model, split or merge major modules.\n"
-            "\n"
-            "These are suggestions, not fences. If the feedback clearly calls for a\n"
-            "larger scope, escalate accordingly.\n"
-        )
+        if force_architecture:
+            scope_guide = (
+                "## Scope\n"
+                "You MUST choose Architecture this iteration — do NOT pick Tuning or Components.\n"
+                "Redesign the overall approach, replace the core algorithm, restructure\n"
+                "the data model, split or merge major modules.\n"
+            )
+            _run_logger.info(
+                f"[Iter {self._iteration + 1}] Forcing Architecture scope (tier 3)"
+            )
+        else:
+            scope_guide = (
+                "## Scope\n"
+                "Assess the feedback and decide the appropriate scope of change. "
+                "Choose one — Tuning, Components, or Architecture — and start "
+                "your plan with `Scope: <choice>`.\n"
+                "\n"
+                "- Tuning: Adjust thresholds, defaults, hyperparameters, constants,\n"
+                "  magic numbers, seeds, convergence tolerances, iteration counts.\n"
+                "- Components: Swap or rewrite subroutines, change loss/cost functions,\n"
+                "  replace heuristics, restructure data flow within a function,\n"
+                "  add/remove intermediate steps in a pipeline.\n"
+                "- Architecture: Redesign the overall approach, replace the core\n"
+                "  algorithm, restructure the data model, split or merge major modules.\n"
+                "\n"
+                "These are suggestions, not fences. If the feedback clearly calls for a\n"
+                "larger scope, escalate accordingly.\n"
+            )
 
         plan_structure = (
             "## Plan Structure\n"
@@ -1737,6 +1753,13 @@ Do not try to improve the score — just fix the errors.
             f"depth={self.tree._node_depth(target_node)})"
         )
 
+        # Force Architecture tier at root level 25% of the time, 10% elsewhere.
+        force_architecture = random.random() < (
+            _FORCE_ARCHITECTURE_PROB
+            if self.tree._node_depth(target_node) <= 1
+            else _FORCE_ARCHITECTURE_DEEP_PROB
+        )
+
         # Update decay exploration constant
         if self.use_decay:
             self.tree.explore_c = self._get_decay_exploration_c()
@@ -1971,12 +1994,15 @@ Do not try to improve the score — just fix the errors.
                     self.codebase.get_experiment_files(),
                 )
 
-                planner_input, plan = self._run_planner(feedback)
+                planner_input, plan = self._run_planner(feedback, force_architecture=force_architecture)
                 # Parse self-selected scope from planner output for webapp display.
-                scope_match = re.search(r'(?:^|\n)Scope:\s*(Tuning|Components|Architecture)', plan or "", re.IGNORECASE)
-                if scope_match:
-                    scope_map = {"tuning": 1, "components": 2, "architecture": 3}
-                    tier = scope_map.get(scope_match.group(1).lower(), 1)
+                if force_architecture:
+                    tier = 3
+                else:
+                    scope_match = re.search(r'(?:^|\n)Scope:\s*(Tuning|Components|Architecture)', plan or "", re.IGNORECASE)
+                    if scope_match:
+                        scope_map = {"tuning": 1, "components": 2, "architecture": 3}
+                        tier = scope_map.get(scope_match.group(1).lower(), 1)
                 _run_logger.info(f"[Iter {self._iteration + 1}] Planner tier: {tier}")
                 hyp_match = re.search(r'\*\*Hypothesis\*\*[^:\n]*:\s*"?([^\n"]+)', plan or "")
                 if hyp_match:
