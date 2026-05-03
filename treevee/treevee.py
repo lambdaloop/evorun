@@ -670,6 +670,7 @@ def _build_claude_env(provider: str, model: str, api_key: str | None) -> dict[st
              (even for the anthropic provider).
     """
     env: dict[str, object] = {}
+    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     if provider == "anthropic":
         env["ANTHROPIC_BASE_URL"] = _UNSET
         env["ANTHROPIC_MODEL"] = _UNSET
@@ -680,7 +681,6 @@ def _build_claude_env(provider: str, model: str, api_key: str | None) -> dict[st
         env["ANTHROPIC_API_KEY"] = api_key if api_key not in (None, "unset") else _UNSET
         env["ANTHROPIC_MODEL"] = model
         env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
-        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     elif provider == "openrouter":
         env["ANTHROPIC_BASE_URL"] = "https://openrouter.ai/api"
         env["ANTHROPIC_API_KEY"] = _UNSET if api_key in (None, "unset") else api_key
