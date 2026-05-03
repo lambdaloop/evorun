@@ -2138,6 +2138,7 @@ Do not try to improve the score — just fix the errors.
             _run_logger.info(f"[Iter {self._iteration + 1}] No code changes — "
                          f"reusing parent score {parent_score}")
             child_score = parent_score
+            is_dup = True
         else:
             _run_logger.info(f"[Iter {self._iteration + 1}] Evaluating "
                          f"child (~{len(modified_files)} modified, "
