@@ -1791,9 +1791,7 @@ Do not try to improve the score — just fix the errors.
                 f"[Iter {self._iteration + 1}] Reusing existing eval score "
                 f"for node {target_node.id[:8]} (skip baseline)"
             )
-        target_node_dir: str | None = None
-        if target_node is not self.tree.root:
-            target_node_dir = self._find_node_snapshot(target_node)
+        target_node_dir = self._find_node_snapshot(target_node)
         if target_node_dir is not None:
             self._restore_snapshot(target_node_dir)
 
